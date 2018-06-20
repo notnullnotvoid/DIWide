@@ -1,0 +1,12 @@
+.DS_Store
+asset/
+bob/bob
+bob/out.ninja
+build/
+lib/
+ply/ply
+ply/*.diw
+res/src/
+SDL2/
+*.xcodeproj
+game

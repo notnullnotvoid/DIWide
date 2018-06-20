@@ -1,0 +1,29 @@
+
+R = roughness [0, 1]
+M = metalness [0, 1]
+C = angle to camera
+L = angle to light
+S = angle of reflected light vector to camera
+I = IOR of material
+
+F = fresnel at C=0
+F = sq((1 - I) / (1 + I))
+
+fresnel = F + (1 - R) * (1 - F) * sq(sq(1 - C)) * (1 - C)
+
+E = phong "exponent"
+E = 1 / (R + 0.01f)
+
+M = specular multiplier
+M = 1 / (R + 0.1f)
+
+specular = M * S / (E - E * S + S)
+
+
+
+//TODO: figure out how to derive phong exponent from roughness
+//TODO: figure out how to derive specular multiplier from phong exponent
+		(maybe integrate phong curve over [0, 1]?)
+//TODO: figure out how metalness factors into all of this!
+
+
