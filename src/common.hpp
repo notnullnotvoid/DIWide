@@ -24,6 +24,11 @@ typedef int16_t i16;
 typedef int32_t i32;
 typedef int64_t i64;
 
+typedef int8_t s8;
+typedef int16_t s16;
+typedef int32_t s32;
+typedef int64_t s64;
+
 typedef uint8_t b8;
 typedef uint16_t b16;
 typedef uint32_t b32;

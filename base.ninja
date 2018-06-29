@@ -4,13 +4,17 @@ builddir = build
 
 #partial option sets
 common = -I. -ISDL2 -Ilib -mmacosx-version-min=10.10.0
-cppflags = -std=c++11 -stdlib=libc++
+#cppflags = -std=c++11 -stdlib=libc++
+cppflags = -std=c++11
 cflags = -std=c11
 
 libflags = $common -Ofast
-srcflags = $common -Wall -Wno-unused-const-variable -Wno-switch -Wno-macro-redefined -Ofast
+srcflags = $common -Wall -Wno-unused-variable -Ofast
 linkflags = -lc++ -lSDL2 -headerpad_max_install_names
 #linkflags = -F "$HOME/Library/Frameworks" -framework SDL2 -lc++
+
+#compiler = /usr/local/opt/llvm/bin/clang
+compiler = gcc-8
 
 img_size = 512
 
@@ -27,21 +31,28 @@ rule ply
     description = Converting model $in
 
 rule lib
-    command = clang -MMD -MF $out.d $libflags $cppflags -c $in -o $out
+    command = $compiler -MMD -MF $out.d $libflags $cppflags -c $in -o $out
     description = Building library $in
     depfile = $out.d
 
 rule clib
-    command = clang -MMD -MF $out.d $libflags $cflags -c $in -o $out
+    command = $compiler -MMD -MF $out.d $libflags $cflags -c $in -o $out
     description = Building library $in
     depfile = $out.d
 
 rule src
-    command = clang -MMD -MF $out.d $srcflags $cppflags -c $in -o $out
+#    command = $compiler -MD -MF $out.d $srcflags $cppflags -c $in -o $out && $compiler $srcflags $cppflags -c $in -E > $out.cpp
+    command = $compiler -MMD -MF $out.d $srcflags $cppflags -c $in -o $out
     description = Building source $in
     depfile = $out.d
 
 rule link
-    command = clang $linkflags -mmacosx-version-min=10.10.0 $in -o $out
+    command = $compiler $linkflags -mmacosx-version-min=10.10.0 $in -o $out
     description = Linking executable $out
 #    command = ld -demangle -dynamic -arch x86_64 -macosx_version_min 10.10.0 -o $out $linkflags $in -lSystem
+
+rule img_pack
+    command = res/build.sh
+    description = Packing images
+
+build res/tomato_c.png: img_pack res/src/BrokenTiles_01_BC.png res/src/Sword9_diffuse.png res/src/CobbleStone_01_BC.png res/src/Tomato_diffuse.png res/src/Sword7_diffuse.png res/src/Sword9_normal.png res/src/CobbleStone_01_N.png res/src/Sword7_roughness.png res/src/Tomato_MetalSmooth.png res/src/BrokenTiles_01_N.png res/src/Sword9_roughness.png res/src/Tomato_normal.png res/src/BrokenTiles_01_R.png res/src/CobbleStone_01_R.png res/src/Sword7_normal.png

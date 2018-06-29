@@ -1,7 +1,26 @@
+//immediate TODO:
+//- use Vert lerp() to do per-line interpolation?
+//- split the single loop with per-line Vert pair selection into two dumb loops
+    //- refactor the scanline inner loop into its own function?
+//- early-out in the case that there are no rows (or no columns?) to be drawn
+//- look into whether the by-value swaps are generating unnecessary code
+    //- if they are, swap pointers around instead
+//- write a SIMD-optimized lerp() that treats the Vert as a bag of floats?
+
+//- figure out how MSAA is going to work
+//- implement MSAA
+
+
+
+//- sort out what code needs to get put into headers to be shared between rasterizers
+//- label and update all those separator comments
+
 //global TODO:
 //- sorting the render queue
 //- point diffuse lighting
 //- metalness map
+
+//- better test scene!
 
 //- improved shadows? (resolution-dependent shading, take gradient/facing into account)
 //- cascaded shadows?
@@ -16,7 +35,6 @@
 
 
 //- finish debug stats
-//- text overlay for stats
 //- more specific performance counters
 //- overdraw visualization
 //- stats about wasted SIMD lanes
@@ -37,6 +55,8 @@
 
 #include <SDL.h>
 
+#include "x86intrin.h"
+
 u64 applicationStartupTimeValue;
 
 double get_time() {
@@ -44,6 +64,21 @@ double get_time() {
     u64 diffTimeValue = currentTimeValue - applicationStartupTimeValue;
     double elapsedSeconds = (double)diffTimeValue / (double)SDL_GetPerformanceFrequency();
     return elapsedSeconds;
+}
+
+//DEBUG GLOBALS
+int totalTris;
+int drawnTris;
+int clippedTris;
+int shadowTotalTris;
+int shadowDrawnTris;
+
+u64 perfFill, perfText, perfShadow, perfDraw, perfTransform, perfRasterize, perfInner, perfBlit;
+uint perfDummy;
+
+inline u64 perf() {
+    // return __rdtsc();
+    return __rdtscp(&perfDummy);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -137,14 +172,7 @@ void free_model(Model * model) {
 ///                                                                                              ///
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-//DEBUG GLOBALS
-int totalTris;
-int drawnTris;
-int clippedTris;
-int shadowTotalTris;
-int shadowDrawnTris;
-
-Vec4 color_sq(Vec4 v) {
+inline Vec4 color_sq(Vec4 v) {
     return { v.x * v.x, v.y * v.y, v.z * v.z, v.w };
 }
 
@@ -246,6 +274,7 @@ void draw_triangle(Canvas * canvas, ZBuffer * shadow, Tex * tex, Vert tri[3]) {
         if (first < 0) first = 0;
         if (last > canvas->width - 1) last = canvas->width - 1;
 
+        u64 preInner = perf();
         for (int x = first; x <= last; ++x) {
             //calculate horizontal interpolation factor for this pixel
             float fa = (maxx - x) * xfactor;
@@ -268,14 +297,12 @@ void draw_triangle(Canvas * canvas, ZBuffer * shadow, Tex * tex, Vert tri[3]) {
             float v = w * (fa * v1 + fb * v2);
 
             //texture sample calculations
-            u *= tex->width;
-            v *= tex->height;
             float uf = u - (int)u;
             float vf = v - (int)v;
-            int iu1 = (int)u & tex->wmask;
-            int iv1 = (int)v & tex->hmask;
-            int iu2 = (int)u + 1 & tex->wmask;
-            int iv2 = (int)v + 1 & tex->hmask;
+            int iu1 = (int) u      & tex->wmask;
+            int iv1 = (int) v      & tex->hmask;
+            int iu2 = (int)(u + 1) & tex->wmask;
+            int iv2 = (int)(v + 1) & tex->hmask;
 
             //sample diffuse texture
             Pixel p11 = tex->pixels[tex->width * iv1 + iu1];
@@ -315,12 +342,12 @@ void draw_triangle(Canvas * canvas, ZBuffer * shadow, Tex * tex, Vert tri[3]) {
                 //shadow sample calculations
                 float sf = sh.x - (int)sh.x;
                 float tf = sh.y - (int)sh.y;
-                int is1 = (int)sh.x & shadow->wmask;
-                int it1 = (int)sh.y & shadow->hmask;
-                int is2 = (int)sh.x + 1 & shadow->wmask;
-                int it2 = (int)sh.y + 1 & shadow->hmask;
+                int is1 = (int) sh.x      & shadow->wmask;
+                int it1 = (int) sh.y      & shadow->hmask;
+                int is2 = (int)(sh.x + 1) & shadow->wmask;
+                int it2 = (int)(sh.y + 1) & shadow->hmask;
 
-                //sample diffuse texture
+                //sample shadow texture
                 float s11 = shadow->depth[shadow->width * it1 + is1];
                 float s12 = shadow->depth[shadow->width * it1 + is2];
                 float s21 = shadow->depth[shadow->width * it2 + is1];
@@ -336,7 +363,7 @@ void draw_triangle(Canvas * canvas, ZBuffer * shadow, Tex * tex, Vert tri[3]) {
 
             //directional diffuse
             float light = fmax(0, dot(l, normal));
-            color *= light * shad + 0.01f;
+            color *= light * shad + 0.04f;
 
             //directional specular
             float e = 1 / (rough + 0.0001f);
@@ -361,8 +388,13 @@ void draw_triangle(Canvas * canvas, ZBuffer * shadow, Tex * tex, Vert tri[3]) {
                        (u8)(fmin(1, sqrtf(color.y + highlight.y)) * 255),
                        (u8)(fmin(1, sqrtf(color.z + highlight.z)) * 255), 255 };
 
+            // row[x] = { (u8)(fmin(1, sqrtf(diffRough.x * light)) * 255),
+            //            (u8)(fmin(1, sqrtf(diffRough.y * light)) * 255),
+            //            (u8)(fmin(1, sqrtf(diffRough.z * light)) * 255), 255 };
+
             zrow[x] = z;
         }
+        perfInner += perf() - preInner;
     }
 }
 
@@ -388,6 +420,8 @@ Vert lerp(Vert a, float f, Vert b) {
     };
 }
 
+#include "sse2.hpp"
+
 void maybe_draw_triangle(Canvas * canv, ZBuffer * shadow, Tex * tex, Vert tri[3]) {
     //cull back faces
     //alternative method: https://www.geeksforgeeks.org/orientation-3-ordered-points/
@@ -405,7 +439,12 @@ void maybe_draw_triangle(Canvas * canv, ZBuffer * shadow, Tex * tex, Vert tri[3]
     if (tri[0].p.z < -1 && tri[1].p.z < -1 && tri[2].p.z < -1) return;
     if (tri[0].p.z >  1 && tri[1].p.z >  1 && tri[2].p.z >  1) return;
 
+    u64 preRasterize = perf();
     draw_triangle(canv, shadow, tex, tri);
+    // draw_triangle_sse2_plain(canv, shadow, tex, tri);
+    // draw_triangle_sse2(canv, shadow, tex, tri);
+    // draw_triangle_sse2_struct(canv, shadow, tex, tri);
+    perfRasterize += perf() - preRasterize;
 }
 
 void draw_model(Canvas * canvas, ZBuffer * shadow, Model * model,
@@ -417,6 +456,7 @@ void draw_model(Canvas * canvas, ZBuffer * shadow, Model * model,
     Mat4 modelshadow = shadowMat * modelMat;
     Mat3 normalMat = inverse_transpose(mat3(modelMat));
 
+    u64 preTransform = perf();
     //vertex transform
     for (int i : range(model->vertCount)) {
         Vertex v = model->vertices[i];
@@ -445,15 +485,20 @@ void draw_model(Canvas * canvas, ZBuffer * shadow, Model * model,
         s.x = (s.x + 1) *  0.5f * shadow->width;
         s.y = (s.y - 1) * -0.5f * shadow->height;
 
-        //NOTE: assumes uv will be > -8 to make rounding faster for texture fetch
-        //      (floor is slower than round-toward-zero, even in SIMD)
-        v.u += 8 - 0.5f / model->tex.width;
-        v.v += 8 - 0.5f / model->tex.width;
+        //NOTE: assumes uv will be > -2 to make rounding faster for texture fetch
+        //      (floor is slower than round-toward-zero, even in SIMD (I think))
+        v.u += 2 - 0.5f / model->tex.width;
+        v.v += 2 - 0.5f / model->tex.height;
+
+        //premultiply uv by texture size
+        v.u *= model->tex.width;
+        v.v *= model->tex.height;
 
         Vec3 n = noz(normalMat * v.n);
 
         model->verts[i] = { p, n * p.w, l * p.w, c * p.w, s * p.w, v.u * p.w, v.v * p.w };
     }
+    perfTransform += perf() - preTransform;
 
     //draw triangles
     for (int i : range(model->triCount)) {
@@ -673,6 +718,59 @@ void draw_shadow(ZBuffer * canv, Model * model, Mat4 modelMat, Mat4 viewMat) {
 ///                                                                                              ///
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+struct MonoFont {
+    Pixel * pixels;
+    int texWidth, texHeight;
+    int glyphWidth, glyphHeight;
+    int cols, rows;
+};
+
+MonoFont load_mono_font(const char * filepath, int cols, int rows) {
+    Image image = load_image(filepath);
+    assert(image.w % cols == 0 && image.h % rows == 0);
+    return { image.pixels, image.w, image.h, image.w / cols, image.h / rows, cols, rows };
+}
+
+Pixel operator|(Pixel l, Pixel r) {
+    return { (u8)(l.b | r.b), (u8)(l.g | r.g), (u8)(l.r | r.r), (u8)(l.a | r.a) };
+}
+
+Pixel & operator|=(Pixel & l, Pixel r) {
+    l = l | r;
+    return l;
+}
+
+//UNSAFE: does not do any bounds checking!
+void draw_glyph(Canvas * canvas, MonoFont * font, int cx, int cy, int glyph) {
+    int row = glyph / font->cols;
+    int col = glyph % font->cols;
+    int srcx = col * font->glyphWidth;
+    int srcy = row * font->glyphHeight;
+
+    for (int y : range(font->glyphHeight)) {
+        Pixel * dest = canvas->pixels + (cy + y) * canvas->pitch + cx;
+        float * zdest = canvas->depth + (cy + y) * canvas->width + cx;
+        Pixel * src = font->pixels + (srcy + y) * font->texWidth + srcx;
+        for (int x : range(font->glyphWidth)) {
+            dest[x] |= src[x];
+            if (src[x].b | src[x].g | src[x].r) {
+                //TODO: track how many pixels covered by text?
+                zdest[x] = -1;
+            }
+        }
+    }
+}
+
+void draw_text(Canvas * canvas, MonoFont * font, int x, int y, const char * text) {
+    for (int i = 0; text[i] != '\0'; ++i) {
+        draw_glyph(canvas, font, x + i * font->glyphWidth, y, text[i]);
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                              ///
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
 struct DrawCall {
     Model * model;
     Mat4 mat;
@@ -692,6 +790,10 @@ int main() {
     const int gameWidth = 192*2;
     const int gameHeight = 120*2;
     const int gameScale = 4;
+    // const int gameWidth = 64*2;
+    // const int gameHeight = 64*2;
+    // const int gameScale = 8;
+    assert(gameWidth % 8 == 0);
 
     SDL_Window * window = SDL_CreateWindow("Test Window",
         SDL_WINDOWPOS_CENTERED_DISPLAY(1), SDL_WINDOWPOS_CENTERED_DISPLAY(1),
@@ -720,10 +822,12 @@ int main() {
         { { 1, 1, 0 },   { 0, 0, 1 },   { 1, 0, 0 },   { 0, 1, 0 },    1,  1 },
     };
     Triangle _triangles[2] = { { 0, 3, 1 }, { 0, 2, 3 } };
-    Model test = { 4, _vertices, (Vert *) malloc(4 * sizeof(Vert)), 2, _triangles, sword2->tex };
+    Model test = { 4, _vertices, (Vert *) malloc(4 * sizeof(Vert)), 2, _triangles, sword->tex };
     Model floor = { 4, _vertices, (Vert *) malloc(4 * sizeof(Vert)), 2, _triangles,
                      // load_texture("res/cobblestone1_c.png", "res/cobblestone1_n.png") };
                      load_texture("res/tiles1_c.png", "res/tiles1_n.png") };
+
+    MonoFont mono = load_mono_font("3x6-bw.png", 16, 8);
     printf("SDL full init: %f seconds\n", get_time());
 
 
@@ -739,10 +843,12 @@ int main() {
     float cameraPitch = 0.6;
 
     //timestep and framerate info
-    float frameTimes[10] = {};
+    float frameTimes[100] = {};
     float time = get_time();
     float lastTime = 0;
     int frame = 0;
+
+    List<DrawCall> drawList = {};
 
     bool shouldExit = false;
     while (!shouldExit) {
@@ -805,7 +911,7 @@ int main() {
         }
 
 
-
+        u64 preFill = perf();
         //clear the screen
         for (int y = 0; y < canvas->height; ++y) {
             Pixel * row = canvas->pixels + y * canvas->pitch;
@@ -815,8 +921,63 @@ int main() {
                 zrow[x] = 1.0f;
             }
         }
+        perfFill = perf() - preFill;
 
-        List<DrawCall> drawList = {};
+
+
+        //update sliding window filter for framerate
+        float timeSum = dt;
+        for (int i : range(1, ARR_SIZE(frameTimes))) {
+            frameTimes[i - 1] = frameTimes[i];
+            timeSum += frameTimes[i - 1];
+        }
+        frameTimes[ARR_SIZE(frameTimes) - 1] = dt;
+
+        float framerate = ARR_SIZE(frameTimes) / timeSum;
+        // if (frame % 100 == 9) {
+        //     printf("total: %6d   drawn: %6d   shadow total: %6d   shadow: %6d   clipped: %5d"
+        //            "   draw calls: %6d   fps: %3d\n",
+        //            totalTris, drawnTris, shadowTotalTris, shadowDrawnTris, clippedTris,
+        //            (int) drawList.len, (int)(framerate + 0.5f));
+        // }
+
+#if 1
+        u64 preText = perf();
+        char buffer[250];
+        sprintf(buffer, "total:        %5d   drawn:      %5d", totalTris, drawnTris);
+        draw_text(canvas, &mono, 4, 4, buffer);
+        sprintf(buffer, "shadow total: %5d   shadow:     %5d", shadowTotalTris, shadowDrawnTris);
+        draw_text(canvas, &mono, 4, 12, buffer);
+        sprintf(buffer, "clipped:      %5d   draw calls: %5d", clippedTris, (int) drawList.len);
+        draw_text(canvas, &mono, 4, 20, buffer);
+        sprintf(buffer, "fps: %3d", (int)(framerate + 0.5f));
+        draw_text(canvas, &mono, canvas->width - strlen(buffer) * mono.glyphWidth - 4, 4, buffer);
+
+        sprintf(buffer, "fill:      %6lldk", perfFill      / 1024);
+        draw_text(canvas, &mono, 4, 36, buffer);
+        sprintf(buffer, "text:      %6lldk", perfText      / 1024);
+        draw_text(canvas, &mono, 4, 44, buffer);
+        sprintf(buffer, "shadow:    %6lldk", perfShadow    / 1024);
+        draw_text(canvas, &mono, 4, 52, buffer);
+        sprintf(buffer, "draw:      %6lldk", perfDraw      / 1024);
+        draw_text(canvas, &mono, 4, 60, buffer);
+        sprintf(buffer, "blit:      %6lldk", perfBlit      / 1024);
+        draw_text(canvas, &mono, 4, 68, buffer);
+
+        sprintf(buffer, "transform: %6lldk", perfTransform / 1024);
+        draw_text(canvas, &mono, 4, 84, buffer);
+        sprintf(buffer, "rasterize: %6lldk", perfRasterize / 1024);
+        draw_text(canvas, &mono, 4, 92, buffer);
+        sprintf(buffer, "inner:     %6lldk", perfInner     / 1024);
+        draw_text(canvas, &mono, 4, 100, buffer);
+        perfText = perf() - preText;
+#endif
+
+        totalTris = drawnTris = clippedTris = shadowTotalTris = shadowDrawnTris = 0;
+        perfTransform = perfRasterize = perfInner = 0;
+
+
+        drawList.len = 0;
         Vec3 lightPos = vec3(-1, sinf(get_time() * 1.4f), 0);
         Vec3 lightDir = noz(vec3(sin(get_time() * 0.5f), 0.5f, cos(get_time() * 0.5f)));
 
@@ -836,7 +997,7 @@ int main() {
             drawList.add({ &floor, mat, false });
         } {
             Mat4 mat = translate(scale(IDENTITY_4, 2), lightPos);
-            drawList.add({ tomato, mat, false });
+            drawList.add({ tomato, mat, true });
         }
 
 
@@ -846,6 +1007,7 @@ int main() {
         Mat4 shadowMat = scale(look_at(vec3(), -lightDir, vec3(0, 1, 0)),
                                shadow->inv, shadow->inv, shadow->inv);
 
+        u64 preShadow = perf();
         //clear the shadow buffer
         for (int y = 0; y < shadow->height; ++y) {
             float * zrow = shadow->depth + y * shadow->width;
@@ -861,44 +1023,28 @@ int main() {
                 draw_shadow(shadow, call.model, call.mat, newShadowMat);
             }
         }
+        perfShadow = perf() - preShadow;
 
         Mat4 view = translate(IDENTITY_4, vec3(-camPos.x, -camPos.y, -camPos.z));
         view = rotateY(view, cameraYaw);
         view = rotateX(view, cameraPitch);
         Mat4 proj = perspective(radians(60), (float)canvas->width / (float)canvas->height, 1, 100);
 
+        u64 preDraw = perf();
         for (DrawCall call : drawList) {
             draw_model(canvas, shadow,
                        call.model, call.mat, view, proj, shadowMat,
                        camPos, lightDir);
         }
-
-        drawList.finalize();
-
-
-
-        //update sliding window filter for framerate
-        float timeSum = dt;
-        for (int i : range(1, ARR_SIZE(frameTimes))) {
-            frameTimes[i - 1] = frameTimes[i];
-            timeSum += frameTimes[i - 1];
-        }
-        frameTimes[ARR_SIZE(frameTimes) - 1] = dt;
-
-        float framerate = ARR_SIZE(frameTimes) / timeSum;
-        if (frame % 100 == 9) {
-            printf("total: %6d   drawn: %6d   shadow total: %6d   shadow: %6d   clipped: %5d"
-                   "   draw calls: %6d   fps: %3d\n",
-                   totalTris, drawnTris, shadowTotalTris, shadowDrawnTris, clippedTris,
-                   (int) /*drawList.len*/0, (int)(framerate + 0.5f));
-        }
-        totalTris = drawnTris = clippedTris = shadowTotalTris = shadowDrawnTris = 0;
+        perfDraw = perf() - preDraw;
 
 
 
         //upscale into the window's frame buffer
+        u64 preBlit = perf();
         fast_scaled_blit(SDL_GetWindowSurface(window), canvas, gameScale);
         // debug_depth_blit(SDL_GetWindowSurface(window), shadow);
+        perfBlit = perf() - preBlit;
         SDL_UpdateWindowSurface(window);
 
         fflush(stdout);

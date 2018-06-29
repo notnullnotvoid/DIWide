@@ -1,6 +1,15 @@
 #include "blit.hpp"
 
-#include <stdlib.h>
+#include <cstdlib>
+
+void * aligned_alloc(size_t align, size_t size) {
+    size_t mask = align - 1;
+    assert(!(align & mask)); //ensure alignment is power-of-two
+    void * ret = malloc(size);
+    size_t addr = (size_t) ret;
+    assert(!(addr & mask)); //ensure allocation is aligned
+    return ret;
+}
 
 Canvas create_canvas(int width, int height, int margin) {
     //NOTE: we allocate extra buffer margin around the explicitly used canvas area
@@ -8,8 +17,13 @@ Canvas create_canvas(int width, int height, int margin) {
     //      of the canvas. this simplifies and speeds up some operations because it
     //      eliminates the need for bounds checks and explicit handling of edge cases
     int canvasBytes = (width + 2 * margin) * (height + 2 * margin) * sizeof(Pixel);
-    Pixel * canvasData = (Pixel *) malloc(canvasBytes);
-    float * depthData = (float *) malloc(width * height * sizeof(float));
+    int bufferBytes = width * height * sizeof(float);
+    assert(canvasBytes % 32 == 0); //aligned alloc will fail if this is not true!
+    assert(bufferBytes % 32 == 0); //aligned alloc will fail if this is not true!
+    //NOTE: we allocate on 32-byte boundaries for AVX speed,
+    //      and pad extra bytes on the end so that unmasked SIMD reads won't go out of bounds
+    Pixel * canvasData = (Pixel *) aligned_alloc(32, canvasBytes + 32);
+    float * depthData = (float *) aligned_alloc(32, bufferBytes + 32);
     Canvas canv = {
         canvasData + margin * (width + 2 * margin) + margin, depthData,
         width, height, width + 2 * margin, width
@@ -26,7 +40,9 @@ Canvas create_canvas(int width, int height, int margin) {
 
 //same as above, but doesn't allocate a color buffer for the canvas
 ZBuffer create_depth_buffer(int width, int height) {
-    ZBuffer ret = { (float *) malloc(width * height * sizeof(float)), 0, 0,
+    int bufferBytes = width * height * sizeof(Pixel);
+    assert(bufferBytes % 32 == 0); //aligned alloc will fail if this is not true!
+    ZBuffer ret = { (float *) aligned_alloc(32, bufferBytes + 32), 0, 0,
                     width, height, (u32)(width - 1), (u32)(height - 1) };
     assert(!(ret.width & ret.wmask) && !(ret.height & ret.hmask));
     return ret;
@@ -61,7 +77,7 @@ void fast_scaled_blit(SDL_Surface * surface, Canvas * canvas, int scale) {
             Pixel * dest2 = (Pixel *) ((u8 *) surface->pixels + (y * 2 + 1) * surface->pitch);
             for (int x = 0; x < canvas->width; ++x) {
                 Pixel p = src[x];
-                // p = { (u8)(p.b & 0xC0), (u8)(p.g & 0xD0), (u8)(p.r & 0xD0), p.a };
+                // p = { (u8)(p.b & 0xE0), (u8)(p.g & 0xE0), (u8)(p.r & 0xE0), p.a };
                 // p = { (u8)(p.b | p.b >> 3), (u8)(p.g | p.g >> 3), (u8)(p.r | p.r >> 3), p.a };
                 dest1[x * 2 + 0] = p;
                 dest1[x * 2 + 1] = p;
@@ -99,8 +115,8 @@ void fast_scaled_blit(SDL_Surface * surface, Canvas * canvas, int scale) {
             Pixel * dest4 = (Pixel *) ((u8 *) surface->pixels + (y * 4 + 3) * surface->pitch);
             for (int x = 0; x < canvas->width; ++x) {
                 Pixel p = src[x];
-                // p = { (u8)(p.b & 0xC0), (u8)(p.g & 0xE0), (u8)(p.r & 0xE0), p.a };
-                // p = { (u8)(p.b | p.b >> 3), (u8)(p.g | p.g >> 3), (u8)(p.r | p.r >> 3), p.a };
+                // p = { (u8)(p.b & 0xF0), (u8)(p.g & 0xF0), (u8)(p.r & 0xF0), p.a };
+                // p = { (u8)(p.b | p.b >> 4), (u8)(p.g | p.g >> 4), (u8)(p.r | p.r >> 4), p.a };
 
                 // p = { (u8)(p.b & 0xC0), (u8)(p.g & 0xC0), (u8)(p.r & 0xC0), p.a };
                 // p = { (u8)(p.b | p.b >> 2), (u8)(p.g | p.g >> 2), (u8)(p.r | p.r >> 2), p.a };

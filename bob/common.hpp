@@ -1,13 +1,17 @@
-#ifndef TYPES_HPP
-#define TYPES_HPP
+#ifndef COMMON_HPP
+#define COMMON_HPP
 
 #include <cstdint>
 #include <cstddef>
+#include <cstdlib>
+#include <cstdio>
+#include <cstring>
+#include <cassert>
 
 #include <initializer_list>
 
 ////////////////////////////////////////////////////////////////////////////////
-/// TYPEDEFS                                                                 ///
+/// TYPES                                                                    ///
 ////////////////////////////////////////////////////////////////////////////////
 
 typedef uint8_t u8;
@@ -19,6 +23,11 @@ typedef int8_t i8;
 typedef int16_t i16;
 typedef int32_t i32;
 typedef int64_t i64;
+
+typedef int8_t s8;
+typedef int16_t s16;
+typedef int32_t s32;
+typedef int64_t s64;
 
 typedef uint8_t b8;
 typedef uint16_t b16;
@@ -37,13 +46,6 @@ struct Pair {
     T2 second;
 };
 
-// template <typename T1, typename T2, typename T3>
-// struct Triple {
-//     T1 first;
-//     T2 second;
-//     T3 third;
-// }
-
 ////////////////////////////////////////////////////////////////////////////////
 /// RANGES                                                                   ///
 ////////////////////////////////////////////////////////////////////////////////
@@ -52,60 +54,45 @@ struct _range {
     int first;
     int last;
     int step;
-
     struct iterator {
         int value;
         int step;
-
         int operator*() { return value; }
         bool operator!=(iterator & other) { return value != other.value; }
         iterator& operator++() { value += step; return *this; }
     };
-
     iterator begin() { return { first, step }; }
     iterator end() { return { last, step }; }
 };
 inline _range range(int last) { return { 0, last, 1 }; }
 inline _range range(int first, int last) { return { first, last, first > last? -1 : 1 }; }
 
-/*
+//this uses a bogus comparison operator to iterate a null-terminated string
+//in a range for loop without needing to call strlen() first
 struct _strange {
     char * str;
-
-    struct dummy {};
-
     struct iterator {
         char * ch;
-
         char & operator*() { return *ch; }
-        bool operator!=(dummy & other) { return *ch != '\0'; }
+        bool operator!=(iterator & other) { return *ch != '\0' && *other.ch != '\0'; }
         iterator& operator++() { ++ch; return *this; }
     };
-
     iterator begin() { return { str }; }
-    dummy end() { return {}; }
+    iterator end() { return { str }; }
 };
-
 struct _const_strange {
     const char * str;
-
-    struct dummy {};
-
     struct iterator {
         const char * ch;
-
         const char & operator*() { return *ch; }
-        bool operator!=(dummy & other) { return *ch != '\0'; }
+        bool operator!=(iterator & other) { return *ch != '\0' && *other.ch != '\0'; }
         iterator& operator++() { ++ch; return *this; }
     };
-
     iterator begin() { return { str }; }
-    dummy end() { return {}; }
+    iterator end() { return { str }; }
 };
-
 inline _strange range(char * str) { return { str }; }
 inline _const_strange range(const char * str) { return { str }; }
-*/
 
 ////////////////////////////////////////////////////////////////////////////////
 /// STRING UTILS                                                             ///
@@ -131,14 +118,34 @@ inline bool same(const char * first, const char * second) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+/// DEFER                                                                    ///
+////////////////////////////////////////////////////////////////////////////////
+
+//a simplified version of https://gist.github.com/p2004a/045726d70a490d12ad62
+template <typename F>
+struct _defer {
+    F f;
+    _defer(F f) : f(f) {}
+    ~_defer() { f(); }
+};
+
+struct {
+    template <typename F>
+    _defer<F> operator<<(F f) { return _defer<F>(f); };
+} _deferrer;
+
+#define TOKENPASTE2(x, y) x ## y
+#define TOKENPASTE(x, y) TOKENPASTE2(x, y)
+#define defer auto TOKENPASTE(__deferred_lambda_call, __COUNTER__) = _deferrer << [&]
+
+////////////////////////////////////////////////////////////////////////////////
 /// ???                                                                      ///
 ////////////////////////////////////////////////////////////////////////////////
 
 //NOTE: the correct behavior of this function is unfortunately not guaranteed by the standard
 inline char * read_entire_file(const char * filepath) {
     FILE * f = fopen(filepath, "rb");
-    // assert(f);
-    if (!f) return nullptr;
+    assert(f);
     fseek(f, 0, SEEK_END);
     long fsize = ftell(f);
     fseek(f, 0, SEEK_SET);  //same as rewind(f);
@@ -152,49 +159,15 @@ inline char * read_entire_file(const char * filepath) {
     return string;
 }
 
-// template <typename VAL, typename KEY>
-// VAL match_pair(Pair<VAL, KEY> * pairs, int pairCount, KEY key, VAL defaultVal) {
-//     for (int n = 0; n < pairCount; ++n) {
-//         if (pairs[n].second == key) {
-//             return pairs[n].first;
-//         }
-//     }
-
-//     return defaultVal;
-// }
-
-// template <typename VAL>
-// VAL match_str(Pair<VAL, const char *> * pairs, int pairCount, const char * str, VAL defaultVal) {
-//     for (int n = 0; n < pairCount; ++n) {
-//         if (same(pairs[n].second, str)) {
-//             return pairs[n].first;
-//         }
-//     }
-
-//     return defaultVal;
-// }
-
 template <typename VAL, typename KEY>
 VAL match_pair(std::initializer_list<Pair<VAL, KEY>> pairs, KEY key, VAL defaultVal) {
-    for (auto & pair : pairs) {
-        if (pair.second == key) {
-            return pair.first;
+    for (auto it = pairs.begin(); it != pairs.end(); ++it) {
+        if (it->second == key) {
+            return it->first;
         }
     }
-    // for (auto it = pairs.begin(); it != pairs.end(); ++it) {
-    //     if (it->second == key) {
-    //         return it->first;
-    //     }
-    // }
     return defaultVal;
 }
-
-//example usage (from real code)
-// auto rule = match_pair<const char *>({
-//     { "lib", FILE_CPPLIB },
-//     { "clib", FILE_CLIB },
-//     { "src", FILE_SRC },
-// }, f.type, nullptr);
 
 template <typename TYPE>
 bool one_of(std::initializer_list<TYPE> list, TYPE key) {

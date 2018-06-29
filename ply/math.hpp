@@ -123,6 +123,12 @@ inline Vec2 vec2(float x, float y                  ) { return { x, y       }; }
 inline Vec3 vec3(float x, float y, float z         ) { return { x, y, z    }; }
 inline Vec4 vec4(float x, float y, float z, float w) { return { x, y, z, w }; }
 
+inline Mat3 mat3(Vec3 x, Vec3 y, Vec3 z) {
+    return { x.x, x.y, x.z,
+             y.x, y.y, y.z,
+             z.x, z.y, z.z, };
+}
+
 //downcast constructors
 
 inline Vec2 vec2(Vec3 v) { return { v.x, v.y      }; }
@@ -130,11 +136,9 @@ inline Vec2 vec2(Vec4 v) { return { v.x, v.y      }; }
 inline Vec3 vec3(Vec4 v) { return { v.x, v.y, v.z }; }
 
 inline Mat3 mat3(Mat4 m) {
-    return {
-        m.m00, m.m01, m.m02,
-        m.m10, m.m11, m.m12,
-        m.m20, m.m21, m.m22,
-    };
+    return { m.m00, m.m01, m.m02,
+             m.m10, m.m11, m.m12,
+             m.m20, m.m21, m.m22, };
 }
 
 //upcast constructors
@@ -164,39 +168,53 @@ inline Vec3 noz(Vec3 v) { return v.x == 0 && v.y == 0 && v.z == 0? vec3(0, 0, 0)
 inline Vec2 normalize(Vec2 v) { return nor(v); };
 inline Vec3 normalize(Vec3 v) { return nor(v); };
 
-inline Vec2 neg      (Vec2 v) { return { -v.x, -v.y       }; }
-inline Vec2 operator-(Vec2 v) { return { -v.x, -v.y       }; }
-inline Vec3 neg      (Vec3 v) { return { -v.x, -v.y, -v.z }; }
-inline Vec3 operator-(Vec3 v) { return { -v.x, -v.y, -v.z }; }
-inline Vec2 add      (Vec2 l, Vec2 r) { return { l.x + r.x, l.y + r.y            }; }
-inline Vec2 operator+(Vec2 l, Vec2 r) { return { l.x + r.x, l.y + r.y            }; }
-inline Vec3 add      (Vec3 l, Vec3 r) { return { l.x + r.x, l.y + r.y, l.z + r.z }; }
-inline Vec3 operator+(Vec3 l, Vec3 r) { return { l.x + r.x, l.y + r.y, l.z + r.z }; }
-inline Vec2 sub      (Vec2 l, Vec2 r) { return { l.x - r.x, l.y - r.y            }; }
-inline Vec2 operator-(Vec2 l, Vec2 r) { return { l.x - r.x, l.y - r.y            }; }
-inline Vec3 sub      (Vec3 l, Vec3 r) { return { l.x - r.x, l.y - r.y, l.z - r.z }; }
-inline Vec3 operator-(Vec3 l, Vec3 r) { return { l.x - r.x, l.y - r.y, l.z - r.z }; }
-inline Vec2 mul      (float f, Vec2  v) { return { f * v.x, f * v.y          }; }
-inline Vec2 operator*(float f, Vec2  v) { return { f * v.x, f * v.y          }; }
-inline Vec2 mul      (Vec2  v, float f) { return { f * v.x, f * v.y          }; }
-inline Vec2 operator*(Vec2  v, float f) { return { f * v.x, f * v.y          }; }
-inline Vec3 mul      (float f, Vec3  v) { return { f * v.x, f * v.y, f * v.z }; }
-inline Vec3 operator*(float f, Vec3  v) { return { f * v.x, f * v.y, f * v.z }; }
-inline Vec3 mul      (Vec3  v, float f) { return { f * v.x, f * v.y, f * v.z }; }
-inline Vec3 operator*(Vec3  v, float f) { return { f * v.x, f * v.y, f * v.z }; }
-inline Vec3 mul      (Vec2  l, Vec2 r) { return { l.x * r.x, l.y * r.y }; }
-inline Vec3 operator*(Vec2  l, Vec2 r) { return { l.x * r.x, l.y * r.y }; }
-inline Vec3 mul      (Vec3  l, Vec3 r) { return { l.x * r.x, l.y * r.y, l.z * r.z }; }
-inline Vec3 operator*(Vec3  l, Vec3 r) { return { l.x * r.x, l.y * r.y, l.z * r.z }; }
-
-inline Vec2 & operator+=(Vec2 & l, Vec2  r) { return l = { l.x + r.x, l.y + r.y            }; }
-inline Vec3 & operator+=(Vec3 & l, Vec3  r) { return l = { l.x + r.x, l.y + r.y, l.z + r.z }; }
-inline Vec2 & operator-=(Vec2 & l, Vec2  r) { return l = { l.x - r.x, l.y - r.y            }; }
-inline Vec3 & operator-=(Vec3 & l, Vec3  r) { return l = { l.x - r.x, l.y - r.y, l.z - r.z }; }
-inline Vec2 & operator*=(Vec2 & v, float f) { return v = { f * v.x, f * v.y          }; }
-inline Vec3 & operator*=(Vec3 & v, float f) { return v = { f * v.x, f * v.y, f * v.z }; }
+inline Vec2 neg      (Vec2 v) { return { -v.x, -v.y             }; }
+inline Vec2 operator-(Vec2 v) { return { -v.x, -v.y             }; }
+inline Vec3 neg      (Vec3 v) { return { -v.x, -v.y, -v.z       }; }
+inline Vec3 operator-(Vec3 v) { return { -v.x, -v.y, -v.z       }; }
+inline Vec4 neg      (Vec4 v) { return { -v.x, -v.y, -v.z, -v.w }; }
+inline Vec4 operator-(Vec4 v) { return { -v.x, -v.y, -v.z, -v.w }; }
+inline Vec2 add      (Vec2 l, Vec2 r) { return { l.x + r.x, l.y + r.y                       }; }
+inline Vec2 operator+(Vec2 l, Vec2 r) { return { l.x + r.x, l.y + r.y                       }; }
+inline Vec3 add      (Vec3 l, Vec3 r) { return { l.x + r.x, l.y + r.y, l.z + r.z            }; }
+inline Vec3 operator+(Vec3 l, Vec3 r) { return { l.x + r.x, l.y + r.y, l.z + r.z            }; }
+inline Vec4 add      (Vec4 l, Vec4 r) { return { l.x + r.x, l.y + r.y, l.z + r.z, l.w + r.w }; }
+inline Vec4 operator+(Vec4 l, Vec4 r) { return { l.x + r.x, l.y + r.y, l.z + r.z, l.w + r.w }; }
+inline Vec2 sub      (Vec2 l, Vec2 r) { return { l.x - r.x, l.y - r.y                       }; }
+inline Vec2 operator-(Vec2 l, Vec2 r) { return { l.x - r.x, l.y - r.y                       }; }
+inline Vec3 sub      (Vec3 l, Vec3 r) { return { l.x - r.x, l.y - r.y, l.z - r.z            }; }
+inline Vec3 operator-(Vec3 l, Vec3 r) { return { l.x - r.x, l.y - r.y, l.z - r.z            }; }
+inline Vec4 sub      (Vec4 l, Vec4 r) { return { l.x - r.x, l.y - r.y, l.z - r.z, l.w - r.w }; }
+inline Vec4 operator-(Vec4 l, Vec4 r) { return { l.x - r.x, l.y - r.y, l.z - r.z, l.w - r.w }; }
+inline Vec2 mul      (float f, Vec2  v) { return { f * v.x, f * v.y                   }; }
+inline Vec2 operator*(float f, Vec2  v) { return { f * v.x, f * v.y                   }; }
+inline Vec2 mul      (Vec2  v, float f) { return { f * v.x, f * v.y                   }; }
+inline Vec2 operator*(Vec2  v, float f) { return { f * v.x, f * v.y                   }; }
+inline Vec3 mul      (float f, Vec3  v) { return { f * v.x, f * v.y, f * v.z          }; }
+inline Vec3 operator*(float f, Vec3  v) { return { f * v.x, f * v.y, f * v.z          }; }
+inline Vec3 mul      (Vec3  v, float f) { return { f * v.x, f * v.y, f * v.z          }; }
+inline Vec3 operator*(Vec3  v, float f) { return { f * v.x, f * v.y, f * v.z          }; }
+inline Vec4 mul      (float f, Vec4  v) { return { f * v.x, f * v.y, f * v.z, f * v.w }; }
+inline Vec4 operator*(float f, Vec4  v) { return { f * v.x, f * v.y, f * v.z, f * v.w }; }
+inline Vec4 mul      (Vec4  v, float f) { return { f * v.x, f * v.y, f * v.z, f * v.w }; }
+inline Vec4 operator*(Vec4  v, float f) { return { f * v.x, f * v.y, f * v.z, f * v.w }; }
+inline Vec2 mul      (Vec2  l, Vec2 r) { return { l.x * r.x, l.y * r.y                       }; }
+inline Vec2 operator*(Vec2  l, Vec2 r) { return { l.x * r.x, l.y * r.y                       }; }
+inline Vec3 mul      (Vec3  l, Vec3 r) { return { l.x * r.x, l.y * r.y, l.z * r.z            }; }
+inline Vec3 operator*(Vec3  l, Vec3 r) { return { l.x * r.x, l.y * r.y, l.z * r.z            }; }
+inline Vec4 mul      (Vec4  l, Vec4 r) { return { l.x * r.x, l.y * r.y, l.z * r.z, l.w * r.w }; }
+inline Vec4 operator*(Vec4  l, Vec4 r) { return { l.x * r.x, l.y * r.y, l.z * r.z, l.w * r.w }; }
 //TODO: divide by scalar
-//TODO: operators for Vec4
+
+inline Vec2 & operator+=(Vec2 & l, Vec2  r) { return l = l + r; }
+inline Vec3 & operator+=(Vec3 & l, Vec3  r) { return l = l + r; }
+inline Vec4 & operator+=(Vec4 & l, Vec4  r) { return l = l + r; }
+inline Vec2 & operator-=(Vec2 & l, Vec2  r) { return l = l - r; }
+inline Vec3 & operator-=(Vec3 & l, Vec3  r) { return l = l - r; }
+inline Vec4 & operator-=(Vec4 & l, Vec4  r) { return l = l - r; }
+inline Vec2 & operator*=(Vec2 & v, float f) { return v = v * f; }
+inline Vec3 & operator*=(Vec3 & v, float f) { return v = v * f; }
+inline Vec4 & operator*=(Vec4 & v, float f) { return v = v * f; }
 
 inline float dot(Vec2 l, Vec2 r) { return l.x * r.x + l.y * r.y; }
 inline float dot(Vec3 l, Vec3 r) { return l.x * r.x + l.y * r.y + l.z * r.z; }
@@ -211,54 +229,64 @@ inline float len (Vec2 v) { return sqrtf(v.x * v.x + v.y * v.y            ); }
 inline float len2(Vec3 v) { return       v.x * v.x + v.y * v.y + v.z * v.z ; }
 inline float len (Vec3 v) { return sqrtf(v.x * v.x + v.y * v.y + v.z * v.z); }
 
+//TODO: missing matrix ops
+
 //this implementation is adapted from GLM
+//TODO: define in terms of inverse() and transpose() function?
 inline Mat3 inverse_transpose(Mat3 m) {
-    float det =
-        + m.m00 * (m.m11 * m.m22 - m.m12 * m.m21)
-        - m.m01 * (m.m10 * m.m22 - m.m12 * m.m20)
-        + m.m02 * (m.m10 * m.m21 - m.m11 * m.m20);
-    det = 1 / det;
+    float det = 1 / (+ m.m00 * (m.m11 * m.m22 - m.m12 * m.m21)
+                     - m.m01 * (m.m10 * m.m22 - m.m12 * m.m20)
+                     + m.m02 * (m.m10 * m.m21 - m.m11 * m.m20));
 
-    Mat3 inv;
-    inv.m00 = + (m.m11 * m.m22 - m.m21 * m.m12) * det;
-    inv.m01 = - (m.m10 * m.m22 - m.m20 * m.m12) * det;
-    inv.m02 = + (m.m10 * m.m21 - m.m20 * m.m11) * det;
-    inv.m10 = - (m.m01 * m.m22 - m.m21 * m.m02) * det;
-    inv.m11 = + (m.m00 * m.m22 - m.m20 * m.m02) * det;
-    inv.m12 = - (m.m00 * m.m21 - m.m20 * m.m01) * det;
-    inv.m20 = + (m.m01 * m.m12 - m.m11 * m.m02) * det;
-    inv.m21 = - (m.m00 * m.m12 - m.m10 * m.m02) * det;
-    inv.m22 = + (m.m00 * m.m11 - m.m10 * m.m01) * det;
-
-    return inv;
+    return { + (m.m11 * m.m22 - m.m21 * m.m12) * det,
+             - (m.m10 * m.m22 - m.m20 * m.m12) * det,
+             + (m.m10 * m.m21 - m.m20 * m.m11) * det,
+             - (m.m01 * m.m22 - m.m21 * m.m02) * det,
+             + (m.m00 * m.m22 - m.m20 * m.m02) * det,
+             - (m.m00 * m.m21 - m.m20 * m.m01) * det,
+             + (m.m01 * m.m12 - m.m11 * m.m02) * det,
+             - (m.m00 * m.m12 - m.m10 * m.m02) * det,
+             + (m.m00 * m.m11 - m.m10 * m.m01) * det, };
 
     //36 multiplies
     //18 adds
     //1 divide (reciprocal)
 }
 
-//TODO: missing Mat2 and Mat3 ops
+inline Mat3 inverse(Mat3 m) {
+    float det = 1 / (+ m.m00 * (m.m11 * m.m22 - m.m12 * m.m21)
+                     - m.m01 * (m.m10 * m.m22 - m.m12 * m.m20)
+                     + m.m02 * (m.m10 * m.m21 - m.m11 * m.m20));
+
+    return { + (m.m11 * m.m22 - m.m21 * m.m12) * det,
+             - (m.m01 * m.m22 - m.m21 * m.m02) * det,
+             + (m.m01 * m.m12 - m.m11 * m.m02) * det,
+             - (m.m10 * m.m22 - m.m20 * m.m12) * det,
+             + (m.m00 * m.m22 - m.m20 * m.m02) * det,
+             - (m.m00 * m.m12 - m.m10 * m.m02) * det,
+             + (m.m10 * m.m21 - m.m20 * m.m11) * det,
+             - (m.m00 * m.m21 - m.m20 * m.m01) * det,
+             + (m.m00 * m.m11 - m.m10 * m.m01) * det, };
+}
 
 //NOTE: marking this function inline has proven to help code gen on clang
 inline Mat4 mul(Mat4 a, Mat4 b) {
-    Mat4 c;
-    c.m00 = a.m00 * b.m00 + a.m01 * b.m10 + a.m02 * b.m20 + a.m03 * b.m30;
-    c.m01 = a.m00 * b.m01 + a.m01 * b.m11 + a.m02 * b.m21 + a.m03 * b.m31;
-    c.m02 = a.m00 * b.m02 + a.m01 * b.m12 + a.m02 * b.m22 + a.m03 * b.m32;
-    c.m03 = a.m00 * b.m03 + a.m01 * b.m13 + a.m02 * b.m23 + a.m03 * b.m33;
-    c.m10 = a.m10 * b.m00 + a.m11 * b.m10 + a.m12 * b.m20 + a.m13 * b.m30;
-    c.m11 = a.m10 * b.m01 + a.m11 * b.m11 + a.m12 * b.m21 + a.m13 * b.m31;
-    c.m12 = a.m10 * b.m02 + a.m11 * b.m12 + a.m12 * b.m22 + a.m13 * b.m32;
-    c.m13 = a.m10 * b.m03 + a.m11 * b.m13 + a.m12 * b.m23 + a.m13 * b.m33;
-    c.m20 = a.m20 * b.m00 + a.m21 * b.m10 + a.m22 * b.m20 + a.m23 * b.m30;
-    c.m21 = a.m20 * b.m01 + a.m21 * b.m11 + a.m22 * b.m21 + a.m23 * b.m31;
-    c.m22 = a.m20 * b.m02 + a.m21 * b.m12 + a.m22 * b.m22 + a.m23 * b.m32;
-    c.m23 = a.m20 * b.m03 + a.m21 * b.m13 + a.m22 * b.m23 + a.m23 * b.m33;
-    c.m30 = a.m30 * b.m00 + a.m31 * b.m10 + a.m32 * b.m20 + a.m33 * b.m30;
-    c.m31 = a.m30 * b.m01 + a.m31 * b.m11 + a.m32 * b.m21 + a.m33 * b.m31;
-    c.m32 = a.m30 * b.m02 + a.m31 * b.m12 + a.m32 * b.m22 + a.m33 * b.m32;
-    c.m33 = a.m30 * b.m03 + a.m31 * b.m13 + a.m32 * b.m23 + a.m33 * b.m33;
-    return c;
+    return { a.m00 * b.m00 + a.m01 * b.m10 + a.m02 * b.m20 + a.m03 * b.m30,
+             a.m00 * b.m01 + a.m01 * b.m11 + a.m02 * b.m21 + a.m03 * b.m31,
+             a.m00 * b.m02 + a.m01 * b.m12 + a.m02 * b.m22 + a.m03 * b.m32,
+             a.m00 * b.m03 + a.m01 * b.m13 + a.m02 * b.m23 + a.m03 * b.m33,
+             a.m10 * b.m00 + a.m11 * b.m10 + a.m12 * b.m20 + a.m13 * b.m30,
+             a.m10 * b.m01 + a.m11 * b.m11 + a.m12 * b.m21 + a.m13 * b.m31,
+             a.m10 * b.m02 + a.m11 * b.m12 + a.m12 * b.m22 + a.m13 * b.m32,
+             a.m10 * b.m03 + a.m11 * b.m13 + a.m12 * b.m23 + a.m13 * b.m33,
+             a.m20 * b.m00 + a.m21 * b.m10 + a.m22 * b.m20 + a.m23 * b.m30,
+             a.m20 * b.m01 + a.m21 * b.m11 + a.m22 * b.m21 + a.m23 * b.m31,
+             a.m20 * b.m02 + a.m21 * b.m12 + a.m22 * b.m22 + a.m23 * b.m32,
+             a.m20 * b.m03 + a.m21 * b.m13 + a.m22 * b.m23 + a.m23 * b.m33,
+             a.m30 * b.m00 + a.m31 * b.m10 + a.m32 * b.m20 + a.m33 * b.m30,
+             a.m30 * b.m01 + a.m31 * b.m11 + a.m32 * b.m21 + a.m33 * b.m31,
+             a.m30 * b.m02 + a.m31 * b.m12 + a.m32 * b.m22 + a.m33 * b.m32,
+             a.m30 * b.m03 + a.m31 * b.m13 + a.m32 * b.m23 + a.m33 * b.m33, };
 }
 
 inline Mat4 operator*(Mat4 a, Mat4 b) {
@@ -266,11 +294,9 @@ inline Mat4 operator*(Mat4 a, Mat4 b) {
 }
 
 inline Vec3 mul(Mat3 m, Vec3 v) {
-    Vec3 r;
-    r.x = m.m00 * v.x + m.m01 * v.y + m.m02 * v.z;
-    r.y = m.m10 * v.x + m.m11 * v.y + m.m12 * v.z;
-    r.z = m.m20 * v.x + m.m21 * v.y + m.m22 * v.z;
-    return r;
+    return { m.m00 * v.x + m.m01 * v.y + m.m02 * v.z,
+             m.m10 * v.x + m.m11 * v.y + m.m12 * v.z,
+             m.m20 * v.x + m.m21 * v.y + m.m22 * v.z, };
 }
 
 inline Vec3 operator*(Mat3 m, Vec3 v) {
@@ -278,12 +304,10 @@ inline Vec3 operator*(Mat3 m, Vec3 v) {
 }
 
 inline Vec4 mul(Mat4 m, Vec4 v) {
-    Vec4 r;
-    r.x = m.m00 * v.x + m.m01 * v.y + m.m02 * v.z + m.m03 * v.w;
-    r.y = m.m10 * v.x + m.m11 * v.y + m.m12 * v.z + m.m13 * v.w;
-    r.z = m.m20 * v.x + m.m21 * v.y + m.m22 * v.z + m.m23 * v.w;
-    r.w = m.m30 * v.x + m.m31 * v.y + m.m32 * v.z + m.m33 * v.w;
-    return r;
+    return { m.m00 * v.x + m.m01 * v.y + m.m02 * v.z + m.m03 * v.w,
+             m.m10 * v.x + m.m11 * v.y + m.m12 * v.z + m.m13 * v.w,
+             m.m20 * v.x + m.m21 * v.y + m.m22 * v.z + m.m23 * v.w,
+             m.m30 * v.x + m.m31 * v.y + m.m32 * v.z + m.m33 * v.w, };
 }
 
 inline Vec4 operator*(Mat4 m, Vec4 v) {
@@ -292,23 +316,19 @@ inline Vec4 operator*(Mat4 m, Vec4 v) {
 
 inline Mat4 scale(Mat4 m, float s) {
     //OPTIMIZE: can this be simplified?
-    Mat4 sc = {
-        s, 0, 0, 0,
-        0, s, 0, 0,
-        0, 0, s, 0,
-        0, 0, 0, 1,
-    };
+    Mat4 sc = { s, 0, 0, 0,
+                0, s, 0, 0,
+                0, 0, s, 0,
+                0, 0, 0, 1, };
     return mul(sc, m);
 }
 
 inline Mat4 scale(Mat4 m, float x, float y, float z) {
     //OPTIMIZE: can this be simplified?
-    Mat4 sc = {
-        x, 0, 0, 0,
-        0, y, 0, 0,
-        0, 0, z, 0,
-        0, 0, 0, 1,
-    };
+    Mat4 sc = { x, 0, 0, 0,
+                0, y, 0, 0,
+                0, 0, z, 0,
+                0, 0, 0, 1, };
     return mul(sc, m);
 }
 
@@ -329,36 +349,30 @@ inline Mat4 translate(Mat4 m, Vec4 v) {
 inline Mat4 rotateX(Mat4 m, float angle) {
     float c = cosf(angle);
     float s = sinf(angle);
-    Mat4 rot = {
-        1, 0,  0, 0,
-        0, c, -s, 0,
-        0, s,  c, 0,
-        0, 0,  0, 1,
-    };
+    Mat4 rot = { 1, 0,  0, 0,
+                 0, c, -s, 0,
+                 0, s,  c, 0,
+                 0, 0,  0, 1, };
     return mul(rot, m);
 }
 
 inline Mat4 rotateY(Mat4 m, float angle) {
     float c = cosf(angle);
     float s = sinf(angle);
-    Mat4 rot = {
-         c, 0, s, 0,
-         0, 1, 0, 0,
-        -s, 0, c, 0,
-         0, 0, 0, 1,
-    };
+    Mat4 rot = {  c, 0, s, 0,
+                  0, 1, 0, 0,
+                 -s, 0, c, 0,
+                  0, 0, 0, 1, };
     return mul(rot, m);
 }
 
 inline Mat4 rotateZ(Mat4 m, float angle) {
     float c = cosf(angle);
     float s = sinf(angle);
-    Mat4 rot = {
-        c, -s, 0, 0,
-        s,  c, 0, 0,
-        0,  0, 1, 0,
-        0,  0, 0, 1,
-    };
+    Mat4 rot = { c, -s, 0, 0,
+                 s,  c, 0, 0,
+                 0,  0, 1, 0,
+                 0,  0, 0, 1, };
     return mul(rot, m);
 }
 
@@ -381,7 +395,6 @@ inline Mat4 look_at(Vec3 eye, Vec3 target, Vec3 up) {
     ret.m03 = -dot(s, eye);
     ret.m13 = -dot(u, eye);
     ret.m23 =  dot(f, eye);
-
     return ret;
 }
 
