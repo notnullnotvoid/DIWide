@@ -1,12 +1,11 @@
 #ifndef COMMON_HPP
 #define COMMON_HPP
 
-#include <cstdint>
-#include <cstddef>
-#include <cstdlib>
-#include <cstdio>
-#include <cstring>
-#include <cassert>
+#include <stdint.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <assert.h>
 
 #include <initializer_list>
 
@@ -129,7 +128,7 @@ struct _defer {
     ~_defer() { f(); }
 };
 
-struct {
+static struct {
     template <typename F>
     _defer<F> operator<<(F f) { return _defer<F>(f); };
 } _deferrer;

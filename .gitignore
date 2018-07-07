@@ -4,9 +4,11 @@ bob/bob
 bob/out.ninja
 build/
 lib/
+link/
 ply/ply
 ply/*.diw
 res/src/
 SDL2/
 *.xcodeproj
 game
+game.exe

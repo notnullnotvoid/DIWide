@@ -3,9 +3,9 @@
 #ifndef BLIT_HPP
 #define BLIT_HPP
 
-#include <SDL.h>
-
 #include "common.hpp"
+
+#include <SDL_surface.h>
 
 //match window surface's byte order for faster blit
 typedef struct Pixel {

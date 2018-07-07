@@ -8,15 +8,17 @@ common = -I. -ISDL2 -Ilib -mmacosx-version-min=10.10.0
 cppflags = -std=c++11
 cflags = -std=c11
 
-libflags = $common -Ofast
-srcflags = $common -Wall -Wno-unused-variable -Ofast
+opt = -Ofast -march=native
+
+libflags = $common $opt
+srcflags = $common -Wall -Wno-unused-variable $opt
 linkflags = -lc++ -lSDL2 -headerpad_max_install_names
 #linkflags = -F "$HOME/Library/Frameworks" -framework SDL2 -lc++
 
 #compiler = /usr/local/opt/llvm/bin/clang
 compiler = gcc-8
 
-img_size = 512
+img_size = 256
 
 rule img
     command = convert $in -resize $img_size $out

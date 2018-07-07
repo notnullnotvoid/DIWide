@@ -1,6 +1,6 @@
 #include "blit.hpp"
 
-#include <cstdlib>
+#include <stdlib.h>
 
 void * aligned_alloc(size_t align, size_t size) {
     size_t mask = align - 1;

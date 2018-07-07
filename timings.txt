@@ -1,0 +1,229 @@
+comparison of compilers for scalar and SIMD code using my software renderer as a guinea pig
+
+code being compared can be found here: https://github.com/notnullnotvoid/DIWide
+
+
+
+speed:
+
+NOTE: arch for all compilers is base x64 ISA (max instruction set = SSE2)
+
+clang O0 scalar 201000k+
+clang O1 scalar  47100k+
+clang O2 scalar  23000k+
+clang O3 scalar  22900k+
+clang Of scalar  22000k+
+clang Os scalar  23000k+
+
+clang O0 sse2 1  43400k+
+clang O1 sse2 1  12800k+
+clang O2 sse2 1  12600k+
+clang O3 sse2 1  12500k+
+clang Of sse2 1  12400k+
+clang Os sse2 1  12000k+
+
+clang O0 sse2 2 107000k+
+clang O1 sse2 2  56400k+
+clang O2 sse2 2  12500k+
+clang O3 sse2 2  12500k+
+clang Of sse2 2  12400k+
+clang Os sse2 2  11900k+
+
+clang O0 sse2 3 257000k+
+clang O1 sse2 3  55100k+
+clang O2 sse2 3  12300k+
+clang O3 sse2 3  12300k+
+clang Of sse2 3  12200k+
+clang Os sse2 3  12100k+
+
+
+
+clang-6 O0 scalar 207000k+
+clang-6 O1 scalar  48600k+
+clang-6 O2 scalar  24000k+
+clang-6 O3 scalar  24100k+
+clang-6 Of scalar  24000k+
+clang-6 Os scalar  24100k+
+
+clang-6 O0 sse2 1  51100k+
+clang-6 O1 sse2 1  13000k+
+clang-6 O2 sse2 1  12100k+
+clang-6 O3 sse2 1  12000k+
+clang-6 Of sse2 1  11800k+
+clang-6 Os sse2 1  11800k+
+
+clang-6 O0 sse2 2 161000k+
+clang-6 O1 sse2 2  62900k+
+clang-6 O2 sse2 2  11900k+
+clang-6 O3 sse2 2  12500k+
+clang-6 Of sse2 2  12100k+
+clang-6 Os sse2 2  11800k+
+
+clang-6 O0 sse2 3 319000k+
+clang-6 O1 sse2 3  54900k+
+clang-6 O2 sse2 3  11600k+
+clang-6 O3 sse2 3  11900k+
+clang-6 Of sse2 3  11900k+
+clang-6 Os sse2 3  11900k+
+
+
+
+gcc-8 O0 scalar 174000k+
+gcc-8 O1 scalar  30400k+
+gcc-8 O2 scalar  28900k+
+gcc-8 O3 scalar  28800k+
+gcc-8 Of scalar  22000k+
+gcc-8 Os scalar  88300k+
+
+gcc-8 O0 sse2 1  48800k+
+gcc-8 O1 sse2 1  12600k+
+gcc-8 O2 sse2 1  12500k+
+gcc-8 O3 sse2 1  10100k+
+gcc-8 Of sse2 1   9950k+   new = 34400k+ 56fps
+gcc-8 Os sse2 1  13500k+
+
+gcc-8 O0 sse2 2 101000k+
+gcc-8 O1 sse2 2  12400k+
+gcc-8 O2 sse2 2  12400k+
+gcc-8 O3 sse2 2  10200k+
+gcc-8 Of sse2 2  10200k+
+gcc-8 Os sse2 2  13600k+
+
+gcc-8 O0 sse2 3  98900k+
+gcc-8 O1 sse2 3  12500k+
+gcc-8 O2 sse2 3  12400k+
+gcc-8 O3 sse2 3  10000k+
+gcc-8 Of sse2 3   9980k+
+gcc-8 Os sse2 3  13000k+
+
+
+
+factor = ~3.5   [3.45 ~ 3.55]
+NOTE: all msvc cycle timings are ~3.5x what they should be, for reasons beyond my understanding
+      so to compare results against other compilers, you should divide these numbers by 3.5
+
+msvc Od scalar 2380000k+   !!!???
+msvc O1 scalar  177000k+
+msvc O2 scalar  166000k+
+msvc Ox scalar  168000k+
+msvc Os scalar 1980000k+
+
+msvc Od sse2 1  139000k+
+msvc O1 sse2 1   43700k+
+msvc O2 sse2 1   42800k+
+msvc Ox sse2 1   42100k+   fps = 47
+msvc Os sse2 1  138000k+
+
+msvc Od sse2 2  443000k+
+msvc O1 sse2 2   43900k+
+msvc O2 sse2 2   43300k+
+msvc Ox sse2 2   42900k+
+msvc Os sse2 2  438000k+
+
+msvc Od sse2 3  726000k+
+msvc O1 sse2 3   44100k+
+msvc O2 sse2 3   43000k+
+msvc Ox sse2 3   43200k+
+msvc Os sse2 3  739000k+
+
+
+
+size:
+
+clang O0 207kb
+clang O1 121kb
+clang O2 139kb
+clang O3 139kb
+clang Of 139kb
+clang Os 107kb
+clang O0 -flto 70kb
+clang O1 -flto 78kb
+clang O2 -flto 86kb
+clang O3 -flto 86kb
+clang Of -flto 86kb
+clang Os -flto 61kb
+
+clang-6 O0 215kb
+clang-6 O1 121kb
+clang-6 O2 139kb
+clang-6 O3 147kb
+clang-6 Of 147kb
+clang-6 Os 107kb
+clang-6 O0 -flto 104kb
+clang-6 O1 -flto  78kb
+clang-6 O2 -flto  82kb
+clang-6 O3 -flto  94kb
+clang-6 Of -flto  94kb
+clang-6 Os -flto  61kb
+
+gcc-8 O0 198kb
+gcc-8 O1 125kb
+gcc-8 O2 129kb
+gcc-8 O3 194kb
+gcc-8 Of 185kb
+gcc-8 Os 114kb
+gcc-8 O0 -flto 189kb
+gcc-8 O1 -flto 125kb
+gcc-8 O2 -flto 137kb
+gcc-8 O3 -flto 194kb
+gcc-8 Of -flto 190kb
+gcc-8 Os -flto  97kb
+
+msvc Od 377kb
+msvc O1 227kb
+msvc O2 232kb
+msvc Ox 276kb
+msvc Os 374kb
+
+
+
+compile:
+
+full rebuild (all code + assets) 512x textures gcc-8 -Ofast -flto = 7.4s
+
+NOTE: all timings are multi-threaded compilation (4 cores) + single-threaded linker
+
+clang -O0 0.483s
+clang -O1 0.736s
+clang -O2 1.558s
+clang -O3 1.619s
+clang -Of 1.618s
+clang -Os 1.102s
+clang -O0 -flto 1.139s
+clang -O1 -flto 1.334s
+clang -O2 -flto 1.854s
+clang -O3 -flto 1.896s
+clang -Of -flto 1.890s
+clang -Os -flto 1.255s
+
+clang-6 -O0 0.712s
+clang-6 -O1 0.992s
+clang-6 -O2 1.483s
+clang-6 -O3 1.608s
+clang-6 -Of 1.607s
+clang-6 -Os 1.342s
+clang-6 -O0 -flto 0.936s
+clang-6 -O1 -flto 1.895s
+clang-6 -O2 -flto 1.854s
+clang-6 -O3 -flto 2.125s
+clang-6 -Of -flto 2.354s
+clang-6 -Os -flto 1.830s
+
+gcc-8 -O0 0.869s
+gcc-8 -O1 1.422s
+gcc-8 -O2 1.415s
+gcc-8 -O3 2.206s
+gcc-8 -Of 2.207s
+gcc-8 -Os 1.316s
+gcc-8 -O0 -flto 1.618s
+gcc-8 -O1 -flto 2.895s
+gcc-8 -O2 -flto 3.401s
+gcc-8 -O3 -flto 5.798s
+gcc-8 -Of -flto 5.707s
+gcc-8 -Os -flto 2.808s
+
+msvc -Od 0.92s
+msvc -O1 1.29s
+msvc -O2 1.34s
+msvc -Ox 1.32s
+msvc -Os 0.84s

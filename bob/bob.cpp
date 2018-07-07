@@ -184,11 +184,11 @@ int main(int argc, char ** argv) {
 
     fclose(out);
 
-/*
+
     //windows build
     //TODO: specify windows build script location (and whether to generate it at all?)
     FILE * win = fopen("build.bat", "w");
-    fprintf(win, "cl /Ox /ISDL2 /Isoloud /DWITH_SDL2");
+    fprintf(win, "cl /Ox /ISDL2 /Ilib");
     for (File f : files) {
         if (one_of({ FILE_CPPLIB, FILE_CLIB, FILE_SRC }, f.type)) {
             fprintf(win, " %s/%s.%s", f.dir, f.name, f.ext);
@@ -197,7 +197,7 @@ int main(int argc, char ** argv) {
     fprintf(win, " /link /out:game.exe /SUBSYSTEM:CONSOLE\r\ndel *.obj\r\ngame.exe\r\n");
 
     fclose(win);
-*/
+
 
     return 0;
 }

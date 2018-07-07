@@ -2,8 +2,12 @@
 #include "math.hpp"
 #include "blit.hpp"
 
-#include "immintrin.h"
-#include "x86intrin.h"
+
+#ifdef _MSC_VER
+    #include "intrin.h"
+#else
+    #include "x86intrin.h"
+#endif
 
 struct Tex {
     Pixel * pixels;
@@ -18,7 +22,7 @@ extern int clippedTris;
 extern int shadowTotalTris;
 extern int shadowDrawnTris;
 
-extern int perfInner;
+extern u64 perfInner;
 extern uint perfDummy;
 
 inline u64 perf() {
@@ -150,6 +154,7 @@ void draw_triangle_sse2_plain(Canvas * canvas, ZBuffer * shadow, Tex * tex, Vert
         if (first < 0) first = 0;
         if (last > canvas->width - 1) last = canvas->width - 1;
 
+        u64 preInner = perf();
         for (int x = first; x <= last; x += 4) {
             //generate inclusion mask to avoid overwriting pixels
             __m128i ix = _mm_add_epi32(_mm_set_epi32(3, 2, 1, 0), _mm_set1_epi32(x));
@@ -439,8 +444,8 @@ void draw_triangle_sse2_plain(Canvas * canvas, ZBuffer * shadow, Tex * tex, Vert
             //specular aspects
             __m128 rough = _mm_mul_ps(roughness, roughness);
             rough = _mm_mul_ps(roughness, _mm_mul_ps(rough, rough));
-            __m128 e = _mm_rcp_ps(rough + _mm_set1_ps(0.0001f));
-            __m128 m = _mm_rcp_ps(rough + _mm_set1_ps(0.02f));
+            __m128 e = _mm_rcp_ps(_mm_add_ps(rough, _mm_set1_ps(0.0001f)));
+            __m128 m = _mm_rcp_ps(_mm_add_ps(rough, _mm_set1_ps(0.02f)));
 
             //reflection ray
             __m128 rx = _mm_sub_ps(_mm_mul_ps(_mm_set1_ps(2), _mm_mul_ps(lightDot, nx)), lx);
@@ -498,6 +503,7 @@ void draw_triangle_sse2_plain(Canvas * canvas, ZBuffer * shadow, Tex * tex, Vert
             //write to z buffer
             _mm_maskmoveu_si128(_mm_castps_si128(z), inclusionMask, (char *)(zrow + x));
         }
+        perfInner += perf() - preInner;
     }
 }
 
@@ -673,6 +679,7 @@ void draw_triangle_sse2(Canvas * canvas, ZBuffer * shadow, Tex * tex, Vert tri[3
         if (first < 0) first = 0;
         if (last > canvas->width - 1) last = canvas->width - 1;
 
+        u64 preInner = perf();
         for (int x = first; x <= last; x += 4) {
             //generate inclusion mask to avoid overwriting pixels
             __m128i ix = add(_mm_set_epi32(3, 2, 1, 0), epi32(x));
@@ -921,8 +928,8 @@ void draw_triangle_sse2(Canvas * canvas, ZBuffer * shadow, Tex * tex, Vert tri[3
             //specular aspects
             __m128 rough = mul(roughness, roughness);
             rough = mul(roughness, mul(rough, rough));
-            __m128 e = rcp(rough + ps(0.0001f));
-            __m128 m = rcp(rough + ps(0.02f));
+            __m128 e = rcp(add(rough, ps(0.0001f)));
+            __m128 m = rcp(add(rough, ps(0.02f)));
 
             //reflection ray
             __m128 rx = sub(mul(ps(2), mul(lightDot, nx)), lx);
@@ -973,6 +980,7 @@ void draw_triangle_sse2(Canvas * canvas, ZBuffer * shadow, Tex * tex, Vert tri[3
             //write to z buffer
             _mm_maskmoveu_si128(_mm_castps_si128(z), inclusionMask, (char *)(zrow + x));
         }
+        perfInner += perf() - preInner;
     }
 }
 

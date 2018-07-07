@@ -43,6 +43,9 @@
 //- GIF exporter!
 
 #include "common.hpp"
+
+static_assert(sizeof(size_t) == 8, "must be compiled in 64-bit mode");
+
 #include "blit.hpp"
 #include "math.hpp"
 #include "List.hpp"
@@ -55,7 +58,80 @@
 
 #include <SDL.h>
 
-#include "x86intrin.h"
+#ifdef _MSC_VER
+    #include "intrin.h"
+#else
+    #include "x86intrin.h"
+#endif
+
+////////////////////////////////////////////////////////////////////////////////
+/// DYNAMIC LIBRARY LOADING                                                  ///
+////////////////////////////////////////////////////////////////////////////////
+
+#ifdef _WIN32
+
+Uint64 (* PSDL_GetPerformanceCounter) ();
+Uint64 (* PSDL_GetPerformanceFrequency) ();
+int (* PSDL_Init) (Uint32 flags);
+const char * (* PSDL_GetError) ();
+SDL_Window * (* PSDL_CreateWindow) (const char* title, int x, int y, int w, int h, Uint32 flags);
+int (* PSDL_PollEvent) (SDL_Event * event);
+SDL_Surface * (* PSDL_GetWindowSurface) (SDL_Window * window);
+int (* PSDL_UpdateWindowSurface) (SDL_Window * window);
+int (* PSDL_SetRelativeMouseMode) (SDL_bool enabled);
+
+#include <windows.h>
+
+template <typename TYPE>
+bool load_function(HMODULE handle, TYPE * func, const char * name) {
+    *func = (TYPE) GetProcAddress(handle, name);
+    if (*func == nullptr) {
+        printf("FAILED TO LOAD FUNCTION %s\n", name);
+        printf("Error code: %d\n", GetLastError());
+        return false;
+    }
+    return true;
+}
+
+//we don't care to unload the DLL before application exit,
+//so it's fine that we just throw away the handle inside these functions
+//instead of returning it like we're "supposed" to
+bool load_sdl_functions(const char * filepath) {
+    HMODULE handle = LoadLibraryA(filepath);
+    if (!handle) {
+        printf("FAILED TO LOAD DYNAMIC LIBRARY: %s\n", filepath);
+        printf("Error code: %d\n", GetLastError());
+        return false;
+    }
+
+    if (!load_function(handle, &PSDL_GetPerformanceCounter, "SDL_GetPerformanceCounter"))     return false;
+    if (!load_function(handle, &PSDL_GetPerformanceFrequency, "SDL_GetPerformanceFrequency")) return false;
+    if (!load_function(handle, &PSDL_Init, "SDL_Init"))                                       return false;
+    if (!load_function(handle, &PSDL_GetError, "SDL_GetError"))                               return false;
+    if (!load_function(handle, &PSDL_CreateWindow, "SDL_CreateWindow"))                       return false;
+    if (!load_function(handle, &PSDL_PollEvent, "SDL_PollEvent"))                             return false;
+    if (!load_function(handle, &PSDL_GetWindowSurface, "SDL_GetWindowSurface"))               return false;
+    if (!load_function(handle, &PSDL_UpdateWindowSurface, "SDL_UpdateWindowSurface"))         return false;
+    if (!load_function(handle, &PSDL_SetRelativeMouseMode, "SDL_SetRelativeMouseMode"))       return false;
+
+    return true;
+}
+
+#define SDL_GetPerformanceCounter PSDL_GetPerformanceCounter
+#define SDL_GetPerformanceFrequency PSDL_GetPerformanceFrequency
+#define SDL_Init PSDL_Init
+#define SDL_GetError PSDL_GetError
+#define SDL_CreateWindow PSDL_CreateWindow
+#define SDL_PollEvent PSDL_PollEvent
+#define SDL_GetWindowSurface PSDL_GetWindowSurface
+#define SDL_UpdateWindowSurface PSDL_UpdateWindowSurface
+#define SDL_SetRelativeMouseMode PSDL_SetRelativeMouseMode
+
+#endif // _WIN32
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                              ///
+////////////////////////////////////////////////////////////////////////////////////////////////////
 
 u64 applicationStartupTimeValue;
 
@@ -777,7 +853,20 @@ struct DrawCall {
     bool shadow;
 };
 
+//SDL defines main to SDL_Main, which causes errors when linking manually on Windows
+#ifdef _WIN32
+# undef main
+#endif
+
 int main() {
+#ifdef _WIN32
+    bool success = load_sdl_functions("link/SDL2.dll");
+    if (!success) {
+        printf("exiting application because we couldn't load SDL dynamically\n");
+        exit(1);
+    }
+#endif
+
     //initialize timer
     applicationStartupTimeValue = SDL_GetPerformanceCounter();
 
@@ -787,12 +876,9 @@ int main() {
     }
     printf("SDL init: %f seconds\n", get_time());
 
-    const int gameWidth = 192*2;
-    const int gameHeight = 120*2;
-    const int gameScale = 4;
-    // const int gameWidth = 64*2;
-    // const int gameHeight = 64*2;
-    // const int gameScale = 8;
+    const int gameWidth = 192*4;
+    const int gameHeight = 120*4;
+    const int gameScale = 2;
     assert(gameWidth % 8 == 0);
 
     SDL_Window * window = SDL_CreateWindow("Test Window",
@@ -805,7 +891,7 @@ int main() {
     printf("SDL create window: %f seconds\n", get_time());
 
     Canvas canv = create_canvas(gameWidth, gameHeight, 0);
-    ZBuffer depth = create_depth_buffer(1024, 1024);
+    ZBuffer depth = create_depth_buffer(512, 512);
     Canvas * canvas = &canv;
     ZBuffer * shadow = &depth;
     Model * sword = load_model("res/sword7.diw");
@@ -849,6 +935,8 @@ int main() {
     int frame = 0;
 
     List<DrawCall> drawList = {};
+
+    u64 perfRasterLowest = 10000000000;
 
     bool shouldExit = false;
     while (!shouldExit) {
@@ -970,11 +1058,15 @@ int main() {
         draw_text(canvas, &mono, 4, 92, buffer);
         sprintf(buffer, "inner:     %6lldk", perfInner     / 1024);
         draw_text(canvas, &mono, 4, 100, buffer);
+
+        sprintf(buffer, "lowest:    %6lldk", perfRasterLowest / 1024);
+        draw_text(canvas, &mono, 4, 116, buffer);
         perfText = perf() - preText;
 #endif
 
         totalTris = drawnTris = clippedTris = shadowTotalTris = shadowDrawnTris = 0;
         perfTransform = perfRasterize = perfInner = 0;
+
 
 
         drawList.len = 0;
@@ -1002,7 +1094,7 @@ int main() {
 
 
 
-        shadow->scale = 16;
+        shadow->scale = 12;
         shadow->inv = 1.0f / shadow->scale;
         Mat4 shadowMat = scale(look_at(vec3(), -lightDir, vec3(0, 1, 0)),
                                shadow->inv, shadow->inv, shadow->inv);
@@ -1040,6 +1132,13 @@ int main() {
 
 
 
+        //update lowest
+        if (perfInner < perfRasterLowest) {
+            perfRasterLowest = perfInner;
+        }
+
+
+
         //upscale into the window's frame buffer
         u64 preBlit = perf();
         fast_scaled_blit(SDL_GetWindowSurface(window), canvas, gameScale);
@@ -1050,7 +1149,7 @@ int main() {
         fflush(stdout);
         fflush(stderr);
         frame += 1;
-        SDL_Delay(12);
+        // SDL_Delay(12);
 
         //uncomment this to make the game exit immediately (good for testing compile+load times)
         // shouldExit = true;
