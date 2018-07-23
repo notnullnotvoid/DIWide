@@ -1,8 +1,6 @@
 #ifndef COMMON_HPP
 #define COMMON_HPP
 
-#include <stdint.h>
-#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>

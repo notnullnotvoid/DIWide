@@ -25,8 +25,8 @@ Canvas create_canvas(int width, int height, int margin) {
     Pixel * canvasData = (Pixel *) aligned_alloc(32, canvasBytes + 32);
     float * depthData = (float *) aligned_alloc(32, bufferBytes + 32);
     Canvas canv = {
-        canvasData + margin * (width + 2 * margin) + margin, depthData,
-        width, height, width + 2 * margin, width
+        canvasData, canvasData + margin * (width + 2 * margin) + margin,
+        (size_t) canvasBytes + 32, depthData, width, height, width + 2 * margin, width
     };
     //fill whole canvas (including margins) with solid black
     for (int y = 0; y < canv.height; ++y) {
@@ -93,7 +93,7 @@ void fast_scaled_blit(SDL_Surface * surface, Canvas * canvas, int scale) {
             Pixel * dest3 = (Pixel *) ((u8 *) surface->pixels + (y * 3 + 2) * surface->pitch);
             for (int x = 0; x < canvas->width; ++x) {
                 Pixel p = src[x];
-                // p = { (u8)(p.b & 0xC0), (u8)(p.g & 0xD0), (u8)(p.r & 0xD0), p.a };
+                // p = { (u8)(p.b & 0xC0), (u8)(p.g & 0xE0), (u8)(p.r & 0xD0), p.a };
                 // p = { (u8)(p.b | p.b >> 3), (u8)(p.g | p.g >> 3), (u8)(p.r | p.r >> 3), p.a };
                 dest1[x * 3 + 0] = p;
                 dest1[x * 3 + 1] = p;
@@ -115,8 +115,11 @@ void fast_scaled_blit(SDL_Surface * surface, Canvas * canvas, int scale) {
             Pixel * dest4 = (Pixel *) ((u8 *) surface->pixels + (y * 4 + 3) * surface->pitch);
             for (int x = 0; x < canvas->width; ++x) {
                 Pixel p = src[x];
+
                 // p = { (u8)(p.b & 0xF0), (u8)(p.g & 0xF0), (u8)(p.r & 0xF0), p.a };
                 // p = { (u8)(p.b | p.b >> 4), (u8)(p.g | p.g >> 4), (u8)(p.r | p.r >> 4), p.a };
+
+                // p = { (u8)(p.b & 0xF8), (u8)(p.g & 0xF8), (u8)(p.r & 0xF8), p.a };
 
                 // p = { (u8)(p.b & 0xC0), (u8)(p.g & 0xC0), (u8)(p.r & 0xC0), p.a };
                 // p = { (u8)(p.b | p.b >> 2), (u8)(p.g | p.g >> 2), (u8)(p.r | p.r >> 2), p.a };
@@ -126,6 +129,12 @@ void fast_scaled_blit(SDL_Surface * surface, Canvas * canvas, int scale) {
                 // p = { (u8)(p.b | p.b >> 1), (u8)(p.g | p.g >> 1), (u8)(p.r | p.r >> 1), p.a };
                 // p = { (u8)(p.b | p.b >> 2), (u8)(p.g | p.g >> 2), (u8)(p.r | p.r >> 2), p.a };
                 // p = { (u8)(p.b | p.b >> 4), (u8)(p.g | p.g >> 4), (u8)(p.r | p.r >> 4), p.a };
+
+                //0.299*R + 0.587*G + 0.114*B)
+                // u8 val = (p.r + p.g + p.b) / 3;
+                // u8 val = (299 * p.r + 587 * p.g + 114 * p.b) / 1000 >> 6;
+                // p = { val << 6, val << 6 | val << 4, val << 6 };
+
                 dest1[x * 4 + 0] = p;
                 dest1[x * 4 + 1] = p;
                 dest1[x * 4 + 2] = p;

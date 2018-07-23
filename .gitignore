@@ -12,3 +12,4 @@ SDL2/
 *.xcodeproj
 game
 game.exe
+*.gif

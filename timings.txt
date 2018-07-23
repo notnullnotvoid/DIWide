@@ -1,10 +1,13 @@
-comparison of compilers for scalar and SIMD code using my software renderer as a guinea pig
-
-code being compared can be found here: https://github.com/notnullnotvoid/DIWide
+comparison of compilers for scalar and SIMD code using my software renderer as a guinea pig.
+code being compared can be found here:
+https://github.com/notnullnotvoid/DIWide/tree/c4fa0b297b1f30794fe01e796e6ca595d106abc3
 
 
 
 speed:
+
+cycle counts for core rasterization loop
+data is very noisy, so only 3 significant digits were measured
 
 NOTE: arch for all compilers is base x64 ISA (max instruction set = SSE2)
 

@@ -3,8 +3,6 @@
 
 #include <stdlib.h>
 
-//TODO: optimize this class and the code that uses it
-
 //TODO: add method to re-align "head" pointer
 struct FileBuffer {
     uint8_t * block;

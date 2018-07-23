@@ -13,7 +13,9 @@ typedef struct Pixel {
 } Color;
 
 struct Canvas {
+	Pixel * base; //without the base address, we can't free the memory
     Pixel * pixels;
+    size_t pixelBytes;
     float * depth;
     int width, height;
     int pitch, zpitch; //number of pixels, NOT number of bytes!

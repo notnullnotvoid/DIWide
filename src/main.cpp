@@ -12,13 +12,17 @@
 
 
 
+//TODO: can we optimize metalness by treating it as a factor in the fresnel approximation?
+
+
+
 //- sort out what code needs to get put into headers to be shared between rasterizers
+//- move common.hpp, math.hpp, List.hpp into their own directory
 //- label and update all those separator comments
 
 //global TODO:
 //- sorting the render queue
 //- point diffuse lighting
-//- metalness map
 
 //- better test scene!
 
@@ -40,7 +44,6 @@
 //- stats about wasted SIMD lanes
 
 //- vsync?
-//- GIF exporter!
 
 #include "common.hpp"
 
@@ -49,6 +52,7 @@ static_assert(sizeof(size_t) == 8, "must be compiled in 64-bit mode");
 #include "blit.hpp"
 #include "math.hpp"
 #include "List.hpp"
+#include "FileBuffer.hpp"
 
 #include "stb_image.h"
 
@@ -62,6 +66,8 @@ static_assert(sizeof(size_t) == 8, "must be compiled in 64-bit mode");
     #include "intrin.h"
 #else
     #include "x86intrin.h"
+    // #define _bit_scan_reverse __builtin_ia32_bsrsi
+    // #define __rdtscp __builtin_ia32_rdtscp
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -70,20 +76,20 @@ static_assert(sizeof(size_t) == 8, "must be compiled in 64-bit mode");
 
 #ifdef _WIN32
 
-Uint64 (* PSDL_GetPerformanceCounter) ();
-Uint64 (* PSDL_GetPerformanceFrequency) ();
-int (* PSDL_Init) (Uint32 flags);
-const char * (* PSDL_GetError) ();
-SDL_Window * (* PSDL_CreateWindow) (const char* title, int x, int y, int w, int h, Uint32 flags);
-int (* PSDL_PollEvent) (SDL_Event * event);
-SDL_Surface * (* PSDL_GetWindowSurface) (SDL_Window * window);
-int (* PSDL_UpdateWindowSurface) (SDL_Window * window);
-int (* PSDL_SetRelativeMouseMode) (SDL_bool enabled);
+Uint64 (* GetPerformanceCounter) ();
+Uint64 (* GetPerformanceFrequency) ();
+int (* Init) (Uint32 flags);
+const char * (* GetError) ();
+SDL_Window * (* CreateWindow) (const char* title, int x, int y, int w, int h, Uint32 flags);
+int (* PollEvent) (SDL_Event * event);
+SDL_Surface * (* GetWindowSurface) (SDL_Window * window);
+int (* UpdateWindowSurface) (SDL_Window * window);
+int (* SetRelativeMouseMode) (SDL_bool enabled);
 
 #include <windows.h>
 
 template <typename TYPE>
-bool load_function(HMODULE handle, TYPE * func, const char * name) {
+bool load_func(HMODULE handle, TYPE * func, const char * name) {
     *func = (TYPE) GetProcAddress(handle, name);
     if (*func == nullptr) {
         printf("FAILED TO LOAD FUNCTION %s\n", name);
@@ -104,28 +110,28 @@ bool load_sdl_functions(const char * filepath) {
         return false;
     }
 
-    if (!load_function(handle, &PSDL_GetPerformanceCounter, "SDL_GetPerformanceCounter"))     return false;
-    if (!load_function(handle, &PSDL_GetPerformanceFrequency, "SDL_GetPerformanceFrequency")) return false;
-    if (!load_function(handle, &PSDL_Init, "SDL_Init"))                                       return false;
-    if (!load_function(handle, &PSDL_GetError, "SDL_GetError"))                               return false;
-    if (!load_function(handle, &PSDL_CreateWindow, "SDL_CreateWindow"))                       return false;
-    if (!load_function(handle, &PSDL_PollEvent, "SDL_PollEvent"))                             return false;
-    if (!load_function(handle, &PSDL_GetWindowSurface, "SDL_GetWindowSurface"))               return false;
-    if (!load_function(handle, &PSDL_UpdateWindowSurface, "SDL_UpdateWindowSurface"))         return false;
-    if (!load_function(handle, &PSDL_SetRelativeMouseMode, "SDL_SetRelativeMouseMode"))       return false;
+    if (!load_func(handle, &GetPerformanceCounter, "SDL_GetPerformanceCounter"))     return false;
+    if (!load_func(handle, &GetPerformanceFrequency, "SDL_GetPerformanceFrequency")) return false;
+    if (!load_func(handle, &Init, "SDL_Init"))                                       return false;
+    if (!load_func(handle, &GetError, "SDL_GetError"))                               return false;
+    if (!load_func(handle, &CreateWindow, "SDL_CreateWindow"))                       return false;
+    if (!load_func(handle, &PollEvent, "SDL_PollEvent"))                             return false;
+    if (!load_func(handle, &GetWindowSurface, "SDL_GetWindowSurface"))               return false;
+    if (!load_func(handle, &UpdateWindowSurface, "SDL_UpdateWindowSurface"))         return false;
+    if (!load_func(handle, &SetRelativeMouseMode, "SDL_SetRelativeMouseMode"))       return false;
 
     return true;
 }
 
-#define SDL_GetPerformanceCounter PSDL_GetPerformanceCounter
-#define SDL_GetPerformanceFrequency PSDL_GetPerformanceFrequency
-#define SDL_Init PSDL_Init
-#define SDL_GetError PSDL_GetError
-#define SDL_CreateWindow PSDL_CreateWindow
-#define SDL_PollEvent PSDL_PollEvent
-#define SDL_GetWindowSurface PSDL_GetWindowSurface
-#define SDL_UpdateWindowSurface PSDL_UpdateWindowSurface
-#define SDL_SetRelativeMouseMode PSDL_SetRelativeMouseMode
+#define SDL_GetPerformanceCounter GetPerformanceCounter
+#define SDL_GetPerformanceFrequency GetPerformanceFrequency
+#define SDL_Init Init
+#define SDL_GetError GetError
+#define SDL_CreateWindow CreateWindow
+#define SDL_PollEvent PollEvent
+#define SDL_GetWindowSurface GetWindowSurface
+#define SDL_UpdateWindowSurface UpdateWindowSurface
+#define SDL_SetRelativeMouseMode SetRelativeMouseMode
 
 #endif // _WIN32
 
@@ -152,9 +158,10 @@ int shadowDrawnTris;
 u64 perfFill, perfText, perfShadow, perfDraw, perfTransform, perfRasterize, perfInner, perfBlit;
 uint perfDummy;
 
-inline u64 perf() {
+u64 perf() {
     // return __rdtsc();
     return __rdtscp(&perfDummy);
+    // return __builtin_ia32_rdtscp(&perfDummy);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -191,7 +198,7 @@ Tex load_texture(const char * diffuse, const char * normals) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-///                                                                                              ///
+/// MODEL DATA FORMAT                                                                            ///
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 struct Vertex {
@@ -222,7 +229,7 @@ struct Model {
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-///                                                                                              ///
+/// MODEL LOADING                                                                                ///
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 Model * load_model(const char * path) {
@@ -245,7 +252,7 @@ void free_model(Model * model) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
-///                                                                                              ///
+/// RASTERIZATION                                                                                ///
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 inline Vec4 color_sq(Vec4 v) {
@@ -401,13 +408,15 @@ void draw_triangle(Canvas * canvas, ZBuffer * shadow, Tex * tex, Vert tri[3]) {
             Pixel m12 = tex->normals[tex->width * iv1 + iu2];
             Pixel m21 = tex->normals[tex->width * iv2 + iu1];
             Pixel m22 = tex->normals[tex->width * iv2 + iu2];
-            Vec3 n11 = vec3(m11.r, m11.g, m11.b);
-            Vec3 n12 = vec3(m12.r, m12.g, m12.b);
-            Vec3 n21 = vec3(m21.r, m21.g, m21.b);
-            Vec3 n22 = vec3(m22.r, m22.g, m22.b);
-            Vec3 n1 = n11 * (1 - uf) + n12 * uf;
-            Vec3 n2 = n21 * (1 - uf) + n22 * uf;
-            Vec3 normal = n1 * (1 - vf) + n2 * vf;
+            Vec4 n11 = vec4(m11.r, m11.g, m11.b, m11.a);
+            Vec4 n12 = vec4(m12.r, m12.g, m12.b, m12.a);
+            Vec4 n21 = vec4(m21.r, m21.g, m21.b, m21.a);
+            Vec4 n22 = vec4(m22.r, m22.g, m22.b, m22.a);
+            Vec4 n1 = n11 * (1 - uf) + n12 * uf;
+            Vec4 n2 = n21 * (1 - uf) + n22 * uf;
+            Vec4 norMetal = n1 * (1 - vf) + n2 * vf;
+            Vec3 normal = vec3(norMetal);
+            float metalness = norMetal.w * (1.0f / 255);
 
             normal = nor(normal - vec3(127.5f));
             l = nor(l);
@@ -449,24 +458,41 @@ void draw_triangle(Canvas * canvas, ZBuffer * shadow, Tex * tex, Vert tri[3]) {
             //specular = M * S / (E - E * S + S)
             float specular = m * spec / (e - e * spec + spec) + 0.02f;
 
-            float ior = 1.333; //ior of water, chosen for no particular reason
+            //calculate fresnel factors
+            float ior = 1.45; //kinda arbitrary?
+            float ior2 = 20;//13.33;
             float f = sq((1 - ior) / (1 + ior));
+            float f2 = sq((1 - ior2) / (1 + ior2));
             float headon = fmax(0, dot(c, normal));
             //fresnel = F + (1 - R) * (1 - F) * sq(sq(1 - C)) * (1 - C)
             float fresnel = f + sq(1 - roughness) * (1 - f) * sq(sq(1 - headon)) * (1 - headon);
+            float fresnel2 = f2 + sq(1 - roughness) * (1 - f2) * sq(sq(1 - headon)) * (1 - headon);
 
-            Vec3 highlight = vec3(191, 127, 0) * (1.0f / 255) * 0.1f * fmax(0, n.y);
+            //calculate dielectric output
+            Vec3 highlight = vec3(191, 127, 0) * (1.0f / 255) * 0.2f * fmax(0, n.y);
             highlight += vec3(specular * shad);
             highlight *= fresnel;
-            color *= 1 - fresnel;
+            Vec3 diffColor = color * (1 - fresnel);
+            Vec3 dielectric = diffColor + highlight;
 
-            row[x] = { (u8)(fmin(1, sqrtf(color.x + highlight.x)) * 255),
-                       (u8)(fmin(1, sqrtf(color.y + highlight.y)) * 255),
-                       (u8)(fmin(1, sqrtf(color.z + highlight.z)) * 255), 255 };
+            //calculate metal output
+            Vec3 metalHighlight = vec3(191, 127, 0) * (1.0f / 255) * 0.2f * fmax(0, n.y);
+            metalHighlight += vec3(specular * shad);
+            metalHighlight *= fresnel2 * vec3(diffRough);
+            Vec3 metalColor = color * (1 - fresnel2);
+            Vec3 metal = metalColor + metalHighlight;
 
-            // row[x] = { (u8)(fmin(1, sqrtf(diffRough.x * light)) * 255),
-            //            (u8)(fmin(1, sqrtf(diffRough.y * light)) * 255),
-            //            (u8)(fmin(1, sqrtf(diffRough.z * light)) * 255), 255 };
+            //blend using metalness
+            Vec3 out = metalness * metal + (1 - metalness) * dielectric;
+
+            row[x] = { (u8)(fmin(1, sqrtf(diffColor.x + highlight.x)) * 255),
+                       (u8)(fmin(1, sqrtf(diffColor.y + highlight.y)) * 255),
+                       (u8)(fmin(1, sqrtf(diffColor.z + highlight.z)) * 255), 255 };
+
+            row[x] = { (u8)(fmin(1, sqrtf(out.x)) * 255),
+                       (u8)(fmin(1, sqrtf(out.y)) * 255),
+                       (u8)(fmin(1, sqrtf(out.z)) * 255), 255 };
+
 
             zrow[x] = z;
         }
@@ -496,8 +522,6 @@ Vert lerp(Vert a, float f, Vert b) {
     };
 }
 
-#include "sse2.hpp"
-
 void maybe_draw_triangle(Canvas * canv, ZBuffer * shadow, Tex * tex, Vert tri[3]) {
     //cull back faces
     //alternative method: https://www.geeksforgeeks.org/orientation-3-ordered-points/
@@ -517,9 +541,6 @@ void maybe_draw_triangle(Canvas * canv, ZBuffer * shadow, Tex * tex, Vert tri[3]
 
     u64 preRasterize = perf();
     draw_triangle(canv, shadow, tex, tri);
-    // draw_triangle_sse2_plain(canv, shadow, tex, tri);
-    // draw_triangle_sse2(canv, shadow, tex, tri);
-    // draw_triangle_sse2_struct(canv, shadow, tex, tri);
     perfRasterize += perf() - preRasterize;
 }
 
@@ -847,6 +868,257 @@ void draw_text(Canvas * canvas, MonoFont * font, int x, int y, const char * text
 ///                                                                                              ///
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+struct RawFrame {
+    Pixel * base;
+    Pixel * pixels;
+    int pitch;
+};
+
+//TODO: find a way to write the data blocks without storing up a buffer of 255 bytes
+struct BlockBuffer {
+    u16 bits;
+    u8 bytes[257]; //up to 12 bits can be written at once, so we need 2 extra "overflow" bytes
+};
+
+//XXX: this is very slow because of how it uses the file buffer!
+void put_code(FileBuffer * buf, BlockBuffer * block, int bits, u16 code) {
+    //insert new code into block buffer
+    int idx = block->bits / 8;
+    int bit = block->bits % 8;
+    block->bytes[idx + 0] |= code <<       bit      ;
+    block->bytes[idx + 1] |= code >>  (8 - bit)     ;
+    block->bytes[idx + 2] |= code >> ((8 - bit) + 8);
+    block->bits += bits;
+
+    //flush the block buffer if it's full
+    if (block->bits >= 255 * 8) {
+        buf->write<u8>(255);
+        for (int i : range(255)) {
+            buf->write(block->bytes[i]);
+        }
+
+        block->bits -= 255 * 8;
+        block->bytes[0] = block->bytes[255];
+        block->bytes[1] = block->bytes[256];
+        for (int i : range(2, 257)) {
+            block->bytes[i] = 0;
+        }
+    }
+}
+
+//TODO: replace this array list implementation with a trie
+struct Code {
+    u16 len; //number of bytes represented by this code
+    u16 idx; //index into byte list
+};
+
+struct Encoder {
+    List<u8> bytes;
+    List<Code> codes;
+};
+
+void reset(Encoder * lzw) {
+    lzw->bytes.len = 0;
+    lzw->codes.len = 0;
+
+    for (int i : range(256)) {
+        lzw->bytes.add(i);
+        lzw->codes.add({ 1, (u16) i });
+    }
+
+    //add dummy placeholders for clear code and end code
+    lzw->codes.add({ 0, 0 });
+    lzw->codes.add({ 0, 0 });
+}
+
+bool equal(Encoder lzw, List<u8> buf, Code code) {
+    if (buf.len != code.len)
+        return false;
+    for (int i : range(buf.len))
+        if (buf[i] != lzw.bytes[code.idx + i])
+            return false;
+    return true;
+}
+
+int find(Encoder lzw, List<u8> buf, int lastCode) {
+    if (buf.len < 2)
+        return buf[0];
+    for (int i : range(imax(lastCode, 256 + buf.len), lzw.codes.len))
+        if (equal(lzw, buf, lzw.codes[i]))
+            return i;
+    return -1;
+}
+
+void save_gif(int width, int height, List<RawFrame> frames) {
+    FileBuffer buf = create_file_buffer(2048);
+
+    //header
+    for (char c : range("GIF89a")) {
+        buf.write(c);
+    }
+
+    //logical screen descriptor
+    buf.write<u16>(width);
+    buf.write<u16>(height);
+    //global color table flag, color resolution (???), sort flag, global color table size
+    buf.write<u8>(0b1'001'0'111);
+    buf.write<u8>(0); //background color index
+    buf.write<u8>(0); //pixel aspect ratio
+
+    //global color table
+    //TODO: adaptive color table (per frame?)
+    //TODO: support transparency differencing for better compression
+    for (int i : range(256)) {
+        buf.write<u8>(((i & 0b00000111) << 1) | ((i & 0b00000111) << 5));
+        buf.write<u8>(((i & 0b00111000) >> 2) | ((i & 0b00111000) << 2));
+        buf.write<u8>(((i & 0b11000000) >> 4) | ((i & 0b11000000) << 0));
+    }
+
+    //application extension
+    buf.write<u8>(0x21); //extension introducer
+    buf.write<u8>(0xFF); //extension identifier
+    buf.write<u8>(11); //fixed length data size
+    for (char c : range("NETSCAPE2.0")) {
+        buf.write(c);
+    }
+    buf.write<u8>(3); //data block size
+    buf.write<u8>(1); //???
+    buf.write<u16>(0); //loop forever
+    buf.write<u8>(0); //block terminator
+
+    Encoder lzw = { create_list<u8>(4096 * 2), create_list<Code>(4096) };
+    List<u8> idxBuffer = create_list<u8>(200);
+    //DEBUG
+    uint largestIdxBuffer = 0;
+    uint largestByteList = 0;
+
+    for (RawFrame frame : frames) {
+        BlockBuffer block = {};
+
+        //graphics control extension
+        buf.write<u8>(0x21); //extension introducer
+        buf.write<u8>(0xF9); //extension identifier
+        buf.write<u8>(4); //block size (always 4)
+        buf.write<u8>(0b000'001'0'0); //reserved, disposal method:keep, input flag, transparency flag
+        buf.write<u16>(10); //10/100 seconds per frame //XXX: hardcoded - not good!
+        buf.write<u8>(0); //transparent color index (unused for now)
+        buf.write<u8>(0); //block terminator
+
+        //image descriptor
+        buf.write<u8>(0x2C); //image separator
+        buf.write<u16>(0); //image left
+        buf.write<u16>(0); //image top
+        buf.write<u16>(width);
+        buf.write<u16>(height);
+        //local color table flag, interlace flag, sort flag, reserved, local color table size
+        buf.write<u8>(0b0'0'0'00'000);
+
+        //image data
+        buf.write<u8>(8); //lzw minimum code size
+        reset(&lzw);
+        //XXX: do we actually need to write this?
+        put_code(&buf, &block, _bit_scan_reverse(lzw.codes.len - 1) + 1, 256); //clear code
+
+        int lastCode = -1; //for performance, we remember this from the previous iteration of the loop
+        for (int y : range(height)) {
+            for (int x : range(width)) {
+                Pixel p = frame.pixels[y * frame.pitch + x];
+                u8 idx = (p.b & 0xC0) >> 0 | (p.g & 0xE0) >> 2 | (p.r & 0xE0) >> 5;
+
+    #if 1
+                idxBuffer.add(idx);
+                int code = find(lzw, idxBuffer, lastCode);
+                if (code < 0) {
+                    //write to code stream
+                    int codeBits = _bit_scan_reverse(lzw.codes.len - 1) + 1;
+                    put_code(&buf, &block, codeBits, lastCode);
+                    // printf("%d-%d-%d  ", lastCode, codeBits, (int) lzw.codes.len);
+
+                    //NOTE: [I THINK] we need to leave room for 2 more codes (leftover and end code)
+                    //      because we don't ever reset the table after writing the leftover bits
+                    //XXX: is my thinking correct on this one?
+                    if (lzw.codes.len > 4094) {
+                        //reset buffer code table
+                        put_code(&buf, &block, codeBits, 256); //XXX: assumes constant table size
+                        reset(&lzw);
+                    } else {
+                        //add new code to table
+                        lzw.codes.add({ (u16) idxBuffer.len, (u16) lzw.bytes.len });
+                        for (u8 byte : idxBuffer) {
+                            lzw.bytes.add(byte);
+                        }
+                    }
+
+                    //reset index buffer
+                    idxBuffer[0] = idxBuffer[idxBuffer.len - 1];
+                    idxBuffer.len = 1;
+
+                    lastCode = idxBuffer[0];
+                } else {
+                    lastCode = code;
+                }
+
+                //DEBUG
+                if (idxBuffer.len > largestIdxBuffer)
+                    largestIdxBuffer = idxBuffer.len;
+                if (lzw.bytes.len > largestByteList)
+                    largestByteList = lzw.bytes.len;
+    #endif
+
+                //dumb mode: writes a clear code after every pixel
+                // put_code(&buf, &block, 9, idx);
+                // put_code(&buf, &block, 9, 256);
+            }
+        }
+
+        //write code for leftover index buffer contents
+        put_code(&buf, &block,
+                 _bit_scan_reverse(lzw.codes.len - 1) + 1,
+                 find(lzw, idxBuffer, lastCode));
+
+        //XXX: do we actually need to write this code?
+        put_code(&buf, &block, _bit_scan_reverse(lzw.codes.len) + 1, 257); //end code
+
+        //flush remaining data
+        if (block.bits) {
+            int bytes = (block.bits + 7) / 8; //round up
+            buf.write<u8>(bytes);
+            for (int i : range(bytes)) {
+                buf.write(block.bytes[i]);
+            }
+        }
+
+        buf.write<u8>(0); //terminating block
+
+        //reset encoding state
+        lzw.bytes.len = 0;
+        lzw.codes.len = 0;
+        idxBuffer.len = 0;
+    }
+
+    //DEBUG
+    printf("largest idx buffer: %d\n", largestIdxBuffer);
+    printf("largest byte list: %d\n", largestByteList);
+
+    buf.write<u8>(0x3B); //trailing marker
+
+    //write data to file
+    FILE * fp = fopen("out.gif", "wb");
+    assert(fp);
+    fwrite(buf.block, buf.size(), 1, fp);
+    fclose(fp);
+
+    //cleanup
+    buf.finalize();
+    lzw.bytes.finalize();
+    lzw.codes.finalize();
+    idxBuffer.finalize();
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+///                                                                                              ///
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
 struct DrawCall {
     Model * model;
     Mat4 mat;
@@ -876,9 +1148,9 @@ int main() {
     }
     printf("SDL init: %f seconds\n", get_time());
 
-    const int gameWidth = 192*4;
-    const int gameHeight = 120*4;
-    const int gameScale = 2;
+    const int gameWidth = 192*2;
+    const int gameHeight = 120*2;
+    const int gameScale = 4;
     assert(gameWidth % 8 == 0);
 
     SDL_Window * window = SDL_CreateWindow("Test Window",
@@ -891,7 +1163,7 @@ int main() {
     printf("SDL create window: %f seconds\n", get_time());
 
     Canvas canv = create_canvas(gameWidth, gameHeight, 0);
-    ZBuffer depth = create_depth_buffer(512, 512);
+    ZBuffer depth = create_depth_buffer(1024, 1024);
     Canvas * canvas = &canv;
     ZBuffer * shadow = &depth;
     Model * sword = load_model("res/sword7.diw");
@@ -902,10 +1174,10 @@ int main() {
     tomato->tex = load_texture("res/tomato_c.png", "res/tomato_n.png");
 
     Vertex _vertices[4] = {
-        { { 0, 0, 0 },   { 0, 0, 1 },   { 1, 0, 0 },   { 0, 1, 0 },   -1, -1 },
-        { { 0, 1, 0 },   { 0, 0, 1 },   { 1, 0, 0 },   { 0, 1, 0 },   -1,  1 },
-        { { 1, 0, 0 },   { 0, 0, 1 },   { 1, 0, 0 },   { 0, 1, 0 },    1, -1 },
-        { { 1, 1, 0 },   { 0, 0, 1 },   { 1, 0, 0 },   { 0, 1, 0 },    1,  1 },
+        { { 0, 0, 0 },   { 0, 0, 1 },   { 1, 0, 0 },   { 0, 1, 0 },   -2, -2 },
+        { { 0, 1, 0 },   { 0, 0, 1 },   { 1, 0, 0 },   { 0, 1, 0 },   -2,  2 },
+        { { 1, 0, 0 },   { 0, 0, 1 },   { 1, 0, 0 },   { 0, 1, 0 },    2, -2 },
+        { { 1, 1, 0 },   { 0, 0, 1 },   { 1, 0, 0 },   { 0, 1, 0 },    2,  2 },
     };
     Triangle _triangles[2] = { { 0, 3, 1 }, { 0, 2, 3 } };
     Model test = { 4, _vertices, (Vert *) malloc(4 * sizeof(Vert)), 2, _triangles, sword->tex };
@@ -938,6 +1210,10 @@ int main() {
 
     u64 perfRasterLowest = 10000000000;
 
+    bool recordingGif = false;
+    float gifTimer = 0;
+    List<RawFrame> gifFrames = {};
+
     bool shouldExit = false;
     while (!shouldExit) {
         float dmx = 0, dmy = 0;
@@ -947,6 +1223,17 @@ int main() {
                 shouldExit = true;
             } else if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
                 isDown[event.key.keysym.scancode] = event.type == SDL_KEYDOWN;
+                if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_G) {
+                    if (recordingGif) {
+                        printf("Saving GIF...\n");
+                        float preGif = get_time();
+                        save_gif(gameWidth, gameHeight, gifFrames);
+                        printf("%fs\n", get_time() - preGif);
+                        gifFrames.len = 0;
+                    }
+                    gifTimer = 0;
+                    recordingGif = !recordingGif;
+                }
             } else if (event.type == SDL_MOUSEMOTION) {
                 dmx += event.motion.xrel;
                 dmy += event.motion.yrel;
@@ -997,6 +1284,7 @@ int main() {
                 camPos.y -= sp;
             }
         }
+
 
 
         u64 preFill = perf();
@@ -1061,6 +1349,11 @@ int main() {
 
         sprintf(buffer, "lowest:    %6lldk", perfRasterLowest / 1024);
         draw_text(canvas, &mono, 4, 116, buffer);
+
+        if (recordingGif) {
+            draw_text(canvas, &mono, canvas->width - strlen("GIF") * mono.glyphWidth - 4,
+                                     canvas->height - mono.glyphHeight - 4, "GIF");
+        }
         perfText = perf() - preText;
 #endif
 
@@ -1079,7 +1372,7 @@ int main() {
         } {
             Mat4 mat = rotateZ(scale(IDENTITY_4, 2), -HALF_PI);
             mat = translate(mat, vec3(-4, 2, -10));
-            drawList.add({ sword2, mat, true });
+            drawList.add({ sword, mat, true });
         } {
             Mat4 mat = translate(rotateY(scale(IDENTITY_4, 8), -get_time()*0.0f), vec3(4, 0, 0));
             drawList.add({ &test, mat, false });
@@ -1120,7 +1413,7 @@ int main() {
         Mat4 view = translate(IDENTITY_4, vec3(-camPos.x, -camPos.y, -camPos.z));
         view = rotateY(view, cameraYaw);
         view = rotateX(view, cameraPitch);
-        Mat4 proj = perspective(radians(60), (float)canvas->width / (float)canvas->height, 1, 100);
+        Mat4 proj = perspective(radians(60), (float) canvas->width / canvas->height, 1, 100);
 
         u64 preDraw = perf();
         for (DrawCall call : drawList) {
@@ -1133,8 +1426,8 @@ int main() {
 
 
         //update lowest
-        if (perfInner < perfRasterLowest) {
-            perfRasterLowest = perfInner;
+        if (perfRasterize < perfRasterLowest) {
+            perfRasterLowest = perfRasterize;
         }
 
 
@@ -1146,10 +1439,30 @@ int main() {
         perfBlit = perf() - preBlit;
         SDL_UpdateWindowSurface(window);
 
+
+
+        //set aside frames for GIF
+        if (recordingGif) {
+            int gifFps = 10;
+            float gifFrameTime = 1.0f / gifFps;
+            gifTimer += dt;
+            if (gifTimer > gifFrameTime) {
+                gifTimer -= gifFrameTime;
+                printf("Setting aside GIF frame...\n");
+                //we steal the canvas's memory block because it's much faster than copying the data
+                gifFrames.add({ canvas->base, canvas->pixels, canvas->pitch });
+                size_t offset = canvas->pixels - canvas->base;
+                canvas->base = (Pixel *) malloc(canvas->pixelBytes);
+                canvas->pixels = canvas->base + offset;
+            }
+        }
+
+
+
         fflush(stdout);
         fflush(stderr);
         frame += 1;
-        // SDL_Delay(12);
+        SDL_Delay(12);
 
         //uncomment this to make the game exit immediately (good for testing compile+load times)
         // shouldExit = true;

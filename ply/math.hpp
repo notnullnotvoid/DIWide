@@ -215,6 +215,9 @@ inline Vec4 & operator-=(Vec4 & l, Vec4  r) { return l = l - r; }
 inline Vec2 & operator*=(Vec2 & v, float f) { return v = v * f; }
 inline Vec3 & operator*=(Vec3 & v, float f) { return v = v * f; }
 inline Vec4 & operator*=(Vec4 & v, float f) { return v = v * f; }
+inline Vec2 & operator*=(Vec2 & l, Vec2  r) { return l = l * r; }
+inline Vec3 & operator*=(Vec3 & l, Vec3  r) { return l = l * r; }
+inline Vec4 & operator*=(Vec4 & l, Vec4  r) { return l = l * r; }
 
 inline float dot(Vec2 l, Vec2 r) { return l.x * r.x + l.y * r.y; }
 inline float dot(Vec3 l, Vec3 r) { return l.x * r.x + l.y * r.y + l.z * r.z; }

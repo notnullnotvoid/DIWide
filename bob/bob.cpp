@@ -1,18 +1,12 @@
-//this program walks the root and lib/ directories of the project to generate a .ninja file
+//this program walks various directories of the project to generate a .ninja file
 //yes this is a pun on "bob the builder" don't @ me
 
 //bob/build.sh builds bob.
 //you only need to build bob once before you can build the rest of the project
 
-//TODO: don't overwrite ninja file if it's identical to the generated output
-
 //TODO: walk folder structures recursively
 //TODO: generate .app bundles for macOS
 //TODO: test and make sure this works with symlinks
-
-//wishful thinking section
-//TODO: build for Android
-//TODO: build for iOS
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -188,7 +182,7 @@ int main(int argc, char ** argv) {
     //windows build
     //TODO: specify windows build script location (and whether to generate it at all?)
     FILE * win = fopen("build.bat", "w");
-    fprintf(win, "cl /Ox /ISDL2 /Ilib");
+    fprintf(win, "cl /Ox /ISDL2 /Ilib"); // /arch:AVX2 /favor:INTEL64
     for (File f : files) {
         if (one_of({ FILE_CPPLIB, FILE_CLIB, FILE_SRC }, f.type)) {
             fprintf(win, " %s/%s.%s", f.dir, f.name, f.ext);

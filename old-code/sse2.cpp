@@ -6,7 +6,7 @@
 #ifdef _MSC_VER
     #include "intrin.h"
 #else
-    #include "x86intrin.h"
+    #include "emmintrin.h"
 #endif
 
 struct Tex {
@@ -25,10 +25,7 @@ extern int shadowDrawnTris;
 extern u64 perfInner;
 extern uint perfDummy;
 
-inline u64 perf() {
-    // return __rdtsc();
-    return __rdtscp(&perfDummy);
-}
+extern u64 perf();
 
 
 
