@@ -79,6 +79,9 @@ void fast_scaled_blit(SDL_Surface * surface, Canvas * canvas, int scale) {
                 Pixel p = src[x];
                 // p = { (u8)(p.b & 0xE0), (u8)(p.g & 0xE0), (u8)(p.r & 0xE0), p.a };
                 // p = { (u8)(p.b | p.b >> 3), (u8)(p.g | p.g >> 3), (u8)(p.r | p.r >> 3), p.a };
+
+                // p = { (u8)(p.b & 0xE0), (u8)(p.g & 0xE0), (u8)(p.r & 0xF0), p.a };
+                // p = { (u8)(p.b | p.b >> 4), (u8)(p.g | p.g >> 4), (u8)(p.r | p.r >> 4), p.a };
                 dest1[x * 2 + 0] = p;
                 dest1[x * 2 + 1] = p;
                 dest2[x * 2 + 0] = p;
@@ -95,6 +98,9 @@ void fast_scaled_blit(SDL_Surface * surface, Canvas * canvas, int scale) {
                 Pixel p = src[x];
                 // p = { (u8)(p.b & 0xC0), (u8)(p.g & 0xE0), (u8)(p.r & 0xD0), p.a };
                 // p = { (u8)(p.b | p.b >> 3), (u8)(p.g | p.g >> 3), (u8)(p.r | p.r >> 3), p.a };
+
+                // p = { (u8)(p.b & 0xE0), (u8)(p.g & 0xF0), (u8)(p.r & 0xE0), p.a };
+                // p = { (u8)(p.b | p.b >> 4), (u8)(p.g | p.g >> 4), (u8)(p.r | p.r >> 4), p.a };
                 dest1[x * 3 + 0] = p;
                 dest1[x * 3 + 1] = p;
                 dest1[x * 3 + 2] = p;

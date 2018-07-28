@@ -43,8 +43,8 @@ rule clib
     depfile = $out.d
 
 rule src
-    command = $compiler -MD -MF $out.d $srcflags $cppflags -c $in -o $out && $compiler $srcflags $cppflags -c $in -E > $out.cpp
-#    command = $compiler -MMD -MF $out.d $srcflags $cppflags -c $in -o $out
+#    command = $compiler -MD -MF $out.d $srcflags $cppflags -c $in -o $out && $compiler $srcflags $cppflags -c $in -E > $out.cpp
+    command = $compiler -MMD -MF $out.d $srcflags $cppflags -c $in -o $out
     description = Building source $in
     depfile = $out.d
 

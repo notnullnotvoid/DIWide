@@ -3,21 +3,26 @@
 
 #include <stdlib.h>
 
-//TODO: optimize this class and the code that uses it
-
 //TODO: add method to re-align "head" pointer
+
+//NOTE: this struct zero-initializes to a valid state!
+//      FileBuffer buf = {}; //this is valid
 struct FileBuffer {
     uint8_t * block;
     uint8_t * head;
     uint8_t * end;
 
     void init(size_t bytes = 1024) {
+        assert(bytes > 0);
         block = (uint8_t *) malloc(bytes);
         head = block;
         end = block + bytes;
     }
 
     void check(size_t bytes) {
+        if (head + bytes < end)
+            return;
+
         size_t byte = head - block;
         size_t size = end - block;
 
@@ -37,6 +42,31 @@ struct FileBuffer {
         *((TYPE *)head) = t;
         size_t pos = head - block;
         head += sizeof(t);
+        return pos;
+    }
+
+    template<typename TYPE>
+    size_t write_unsafe(TYPE t) {
+        *((TYPE *)head) = t;
+        size_t pos = head - block;
+        head += sizeof(t);
+        return pos;
+    }
+
+    template<typename TYPE>
+    size_t write_block(TYPE * t, size_t count) {
+        check(count * sizeof(TYPE));
+        size_t pos = head - block;
+        memcpy(head, t, count * sizeof(TYPE));
+        head += count * sizeof(TYPE);
+        return pos;
+    }
+
+    template<typename TYPE>
+    size_t write_block_unsafe(TYPE * t, size_t count) {
+        size_t pos = head - block;
+        memcpy(head, t, count * sizeof(TYPE));
+        head += count * sizeof(TYPE);
         return pos;
     }
 

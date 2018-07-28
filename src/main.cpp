@@ -17,8 +17,9 @@
 
 
 //- sort out what code needs to get put into headers to be shared between rasterizers
-//- move common.hpp, math.hpp, List.hpp into their own directory
+//- move common.hpp, math.hpp, List.hpp, and FileBuffer.hpp into their own directory
 //- label and update all those separator comments
+//- figure out how to do
 
 //global TODO:
 //- sorting the render queue
@@ -65,9 +66,9 @@ static_assert(sizeof(size_t) == 8, "must be compiled in 64-bit mode");
 #ifdef _MSC_VER
     #include "intrin.h"
 #else
-    #include "x86intrin.h"
-    // #define _bit_scan_reverse __builtin_ia32_bsrsi
-    // #define __rdtscp __builtin_ia32_rdtscp
+    // #include "x86intrin.h"
+    #define _bit_scan_reverse __builtin_ia32_bsrsi
+    #define __rdtscp __builtin_ia32_rdtscp
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -417,6 +418,7 @@ void draw_triangle(Canvas * canvas, ZBuffer * shadow, Tex * tex, Vert tri[3]) {
             Vec4 norMetal = n1 * (1 - vf) + n2 * vf;
             Vec3 normal = vec3(norMetal);
             float metalness = norMetal.w * (1.0f / 255);
+            // metalness = 0;
 
             normal = nor(normal - vec3(127.5f));
             l = nor(l);
@@ -541,6 +543,7 @@ void maybe_draw_triangle(Canvas * canv, ZBuffer * shadow, Tex * tex, Vert tri[3]
 
     u64 preRasterize = perf();
     draw_triangle(canv, shadow, tex, tri);
+    // draw_triangle_sse2_plain(canv, shadow, tex, tri);
     perfRasterize += perf() - preRasterize;
 }
 
@@ -868,6 +871,11 @@ void draw_text(Canvas * canvas, MonoFont * font, int x, int y, const char * text
 ///                                                                                              ///
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+//TODO: re-use `used` buffers calculated during meta palette choice for palette generation
+//TODO: SIMD-ize "pre-amble" code
+//TODO: improve memory usage of trie by only allocating as many colors per node
+//      as are used globally, and only bumping the pointer by as many as are used locally
+
 struct RawFrame {
     Pixel * base;
     Pixel * pixels;
@@ -892,17 +900,14 @@ void put_code(FileBuffer * buf, BlockBuffer * block, int bits, u16 code) {
 
     //flush the block buffer if it's full
     if (block->bits >= 255 * 8) {
-        buf->write<u8>(255);
-        for (int i : range(255)) {
-            buf->write(block->bytes[i]);
-        }
+        buf->check(256);
+        buf->write_unsafe<u8>(255);
+        buf->write_block_unsafe(block->bytes, 255);
 
         block->bits -= 255 * 8;
         block->bytes[0] = block->bytes[255];
         block->bytes[1] = block->bytes[256];
-        for (int i : range(2, 257)) {
-            block->bytes[i] = 0;
-        }
+        memset(block->bytes + 2, 0, 255);
     }
 }
 
@@ -912,193 +917,230 @@ struct Code {
     u16 idx; //index into byte list
 };
 
-struct Encoder {
-    List<u8> bytes;
-    List<Code> codes;
+struct TrieNode {
+    i16 next[256];
 };
 
-void reset(Encoder * lzw) {
-    lzw->bytes.len = 0;
-    lzw->codes.len = 0;
-
-    for (int i : range(256)) {
-        lzw->bytes.add(i);
-        lzw->codes.add({ 1, (u16) i });
-    }
-
-    //add dummy placeholders for clear code and end code
-    lzw->codes.add({ 0, 0 });
-    lzw->codes.add({ 0, 0 });
+void reset(List<TrieNode> * lzw, int tableSize) {
+    memset(lzw->data, 0xFF, 4096 * sizeof(TrieNode));
+    lzw->len = tableSize + 2;
 }
 
-bool equal(Encoder lzw, List<u8> buf, Code code) {
-    if (buf.len != code.len)
-        return false;
-    for (int i : range(buf.len))
-        if (buf[i] != lzw.bytes[code.idx + i])
-            return false;
-    return true;
+int choose_meta_palette(List<u16 *> cookedFrames, int width, int height) {
+    bool used[4096];
+    bool used2[4096];
+    int maxUsed[6] = {};
+    int cvtMasks[6] = { 0xFFF, 0xEFF, 0xEFE, 0xEEE, 0xCEE, 0xCEC }; //favor green > red > blue
+    // int cvtMasks[6] = { 0xFFF, 0xEFF, 0xEEF, 0xEEE, 0xCEE, 0xCCE }; //favor red > green > blue
+    //count how many colors are used out of each of a number of possible meta-palettes
+    for (int i : range(1, cookedFrames.len)) {
+        u16 * frame = cookedFrames[i];
+        memset(used, 0, 4096 * sizeof(bool));
+        for (int i : range(width * height))
+            used[frame[i]] = true;
+
+        for (int m : range(6)) {
+            memset(used2, 0, 4096 * sizeof(u8));
+            for (int i : range(4096))
+                used2[i & cvtMasks[m]] |= used[i];
+            int count = 0;
+            for (int i : range(4096))
+                if (used2[i])
+                    ++count;
+            printf("used %3d colors out of %4d\t\t", count, 1 << (12 - m));
+            maxUsed[m] = imax(maxUsed[m], count);
+        }
+        printf("\n");
+    }
+
+    for (int m : range(6)) {
+        printf("used at most %3d colors out of %4d\n", maxUsed[m], 1 << (12 - m));
+    }
+
+    for (int m : range(6)) {
+        if (maxUsed[m] < 256) {
+            return cvtMasks[m];
+        }
+    }
+
+    return 0; //this should never happen
 }
 
-int find(Encoder lzw, List<u8> buf, int lastCode) {
-    if (buf.len < 2)
-        return buf[0];
-    for (int i : range(imax(lastCode, 256 + buf.len), lzw.codes.len))
-        if (equal(lzw, buf, lzw.codes[i]))
-            return i;
-    return -1;
-}
+void save_gif(int width, int height, List<RawFrame> rawFrames, int centiSeconds) {
+    float preAmble = get_time();
 
-void save_gif(int width, int height, List<RawFrame> frames) {
-    FileBuffer buf = create_file_buffer(2048);
-
-    //header
-    for (char c : range("GIF89a")) {
-        buf.write(c);
-    }
-
-    //logical screen descriptor
-    buf.write<u16>(width);
-    buf.write<u16>(height);
-    //global color table flag, color resolution (???), sort flag, global color table size
-    buf.write<u8>(0b1'001'0'111);
-    buf.write<u8>(0); //background color index
-    buf.write<u8>(0); //pixel aspect ratio
-
-    //global color table
-    //TODO: adaptive color table (per frame?)
-    //TODO: support transparency differencing for better compression
-    for (int i : range(256)) {
-        buf.write<u8>(((i & 0b00000111) << 1) | ((i & 0b00000111) << 5));
-        buf.write<u8>(((i & 0b00111000) >> 2) | ((i & 0b00111000) << 2));
-        buf.write<u8>(((i & 0b11000000) >> 4) | ((i & 0b11000000) << 0));
-    }
-
-    //application extension
-    buf.write<u8>(0x21); //extension introducer
-    buf.write<u8>(0xFF); //extension identifier
-    buf.write<u8>(11); //fixed length data size
-    for (char c : range("NETSCAPE2.0")) {
-        buf.write(c);
-    }
-    buf.write<u8>(3); //data block size
-    buf.write<u8>(1); //???
-    buf.write<u16>(0); //loop forever
-    buf.write<u8>(0); //block terminator
-
-    Encoder lzw = { create_list<u8>(4096 * 2), create_list<Code>(4096) };
-    List<u8> idxBuffer = create_list<u8>(200);
-    //DEBUG
-    uint largestIdxBuffer = 0;
-    uint largestByteList = 0;
-
-    for (RawFrame frame : frames) {
-        BlockBuffer block = {};
-
-        //graphics control extension
-        buf.write<u8>(0x21); //extension introducer
-        buf.write<u8>(0xF9); //extension identifier
-        buf.write<u8>(4); //block size (always 4)
-        buf.write<u8>(0b000'001'0'0); //reserved, disposal method:keep, input flag, transparency flag
-        buf.write<u16>(10); //10/100 seconds per frame //XXX: hardcoded - not good!
-        buf.write<u8>(0); //transparent color index (unused for now)
-        buf.write<u8>(0); //block terminator
-
-        //image descriptor
-        buf.write<u8>(0x2C); //image separator
-        buf.write<u16>(0); //image left
-        buf.write<u16>(0); //image top
-        buf.write<u16>(width);
-        buf.write<u16>(height);
-        //local color table flag, interlace flag, sort flag, reserved, local color table size
-        buf.write<u8>(0b0'0'0'00'000);
-
-        //image data
-        buf.write<u8>(8); //lzw minimum code size
-        reset(&lzw);
-        //XXX: do we actually need to write this?
-        put_code(&buf, &block, _bit_scan_reverse(lzw.codes.len - 1) + 1, 256); //clear code
-
-        int lastCode = -1; //for performance, we remember this from the previous iteration of the loop
+    //cook frames (downsample to 12-bit color)
+    List<u16 *> cookedFrames = create_list<u16 *>(rawFrames.len);
+    cookedFrames.add((u16 *) malloc(width * height * sizeof(u16))); //dummy frame for diff base
+    memset(cookedFrames[0], 0, width * height * sizeof(u16)); //set dummy frame to background color
+    for (RawFrame frame : rawFrames) {
+        u16 * data = (u16 *) malloc(width * height * sizeof(u16));
         for (int y : range(height)) {
             for (int x : range(width)) {
                 Pixel p = frame.pixels[y * frame.pitch + x];
-                u8 idx = (p.b & 0xC0) >> 0 | (p.g & 0xE0) >> 2 | (p.r & 0xE0) >> 5;
-
-    #if 1
-                idxBuffer.add(idx);
-                int code = find(lzw, idxBuffer, lastCode);
-                if (code < 0) {
-                    //write to code stream
-                    int codeBits = _bit_scan_reverse(lzw.codes.len - 1) + 1;
-                    put_code(&buf, &block, codeBits, lastCode);
-                    // printf("%d-%d-%d  ", lastCode, codeBits, (int) lzw.codes.len);
-
-                    //NOTE: [I THINK] we need to leave room for 2 more codes (leftover and end code)
-                    //      because we don't ever reset the table after writing the leftover bits
-                    //XXX: is my thinking correct on this one?
-                    if (lzw.codes.len > 4094) {
-                        //reset buffer code table
-                        put_code(&buf, &block, codeBits, 256); //XXX: assumes constant table size
-                        reset(&lzw);
-                    } else {
-                        //add new code to table
-                        lzw.codes.add({ (u16) idxBuffer.len, (u16) lzw.bytes.len });
-                        for (u8 byte : idxBuffer) {
-                            lzw.bytes.add(byte);
-                        }
-                    }
-
-                    //reset index buffer
-                    idxBuffer[0] = idxBuffer[idxBuffer.len - 1];
-                    idxBuffer.len = 1;
-
-                    lastCode = idxBuffer[0];
-                } else {
-                    lastCode = code;
-                }
-
-                //DEBUG
-                if (idxBuffer.len > largestIdxBuffer)
-                    largestIdxBuffer = idxBuffer.len;
-                if (lzw.bytes.len > largestByteList)
-                    largestByteList = lzw.bytes.len;
-    #endif
-
-                //dumb mode: writes a clear code after every pixel
-                // put_code(&buf, &block, 9, idx);
-                // put_code(&buf, &block, 9, 256);
+                data[y * width + x] = (p.b & 0xF0) << 4 | (p.g & 0xF0) | (p.r & 0xF0) >> 4;
             }
         }
+        cookedFrames.add(data);
+        free(frame.base);
+    }
 
-        //write code for leftover index buffer contents
-        put_code(&buf, &block,
-                 _bit_scan_reverse(lzw.codes.len - 1) + 1,
-                 find(lzw, idxBuffer, lastCode));
+    //season the frames (apply mask)
+    float preChoice = get_time();
+    int cvtMask = choose_meta_palette(cookedFrames, width, height);
+    printf("choice: %fs\n", get_time() - preChoice);
+    printf("conversion mask: %X\n", cvtMask);
+    for (u16 * frame : cookedFrames) {
+        for (int i : range(width * height)) {
+            frame[i] &= cvtMask;
+        }
+    }
 
-        //XXX: do we actually need to write this code?
-        put_code(&buf, &block, _bit_scan_reverse(lzw.codes.len) + 1, 257); //end code
+    printf("preAmble: %fs\n", get_time() - preAmble);
+
+    //header
+    FileBuffer buf = create_file_buffer(2048);
+    for (char c : range("GIF89a")) {
+        buf.write_unsafe(c);
+    }
+
+    //logical screen descriptor
+    buf.write_unsafe<u16>(width);
+    buf.write_unsafe<u16>(height);
+    //global color table flag, color resolution (???), sort flag, global color table size
+    buf.write_unsafe<u8>(0b0'001'0'000);
+    buf.write_unsafe<u8>(0); //background color index
+    buf.write_unsafe<u8>(0); //pixel aspect ratio
+
+    //application extension
+    buf.write_unsafe<u8>(0x21); //extension introducer
+    buf.write_unsafe<u8>(0xFF); //extension identifier
+    buf.write_unsafe<u8>(11); //fixed length data size
+    for (char c : range("NETSCAPE2.0")) {
+        buf.write_unsafe(c);
+    }
+    buf.write_unsafe<u8>(3); //data block size
+    buf.write_unsafe<u8>(1); //???
+    buf.write_unsafe<u16>(0); //loop forever
+    buf.write_unsafe<u8>(0); //block terminator
+
+    List<TrieNode> lzw = create_list<TrieNode>(4096);
+    List<u8> idxBuffer = create_list<u8>(200);
+    uint largestIdxBuffer = 0; //DEBUG
+
+    float paletteTotal = 0;
+    for (int i : range(1, cookedFrames.len)) {
+        u16 * pframe = cookedFrames[i - 1];
+        u16 * cframe = cookedFrames[i];
+        // printf("\n\n\n\nnew frame\n\n\n\n");
+
+        float prePalette = get_time();
+        //generate palette
+        u8 tlb[4096] = {};
+        struct Color3 { u8 r, g, b; };
+        Color3 table[256] = {};
+        int tableIdx = 1; //we start counting at 1 because 0 is the transparent color
+        for (int i : range(width * height)) {
+            if (!tlb[cframe[i]]) {
+                tlb[cframe[i]] = tableIdx;
+                table[tableIdx] = {
+                    (u8)((cframe[i] & 0x00F) << 4 | (cframe[i] & 0x00F)     ),
+                    (u8)((cframe[i] & 0x0F0)      | (cframe[i] & 0x0F0) >> 4),
+                    (u8)((cframe[i] & 0xF00) >> 4 | (cframe[i] & 0xF00) >> 8),
+                };
+                ++tableIdx;
+            }
+        }
+        paletteTotal += get_time() - prePalette;
+
+        int tableBits = _bit_scan_reverse(tableIdx - 1) + 1;
+        int tableSize = 1 << tableBits;
+        // printf("idx: %d bits: %d size: %d\n\n\n\n", tableIdx, tableBits, tableSize);
+
+        buf.check(8 + 10);
+        //graphics control extension
+        buf.write_unsafe<u8>(0x21); //extension introducer
+        buf.write_unsafe<u8>(0xF9); //extension identifier
+        buf.write_unsafe<u8>(4); //block size (always 4)
+        //reserved, disposal method:keep, input flag, transparency flag
+        buf.write_unsafe<u8>(0b000'001'0'0 | (i != 1));
+        buf.write_unsafe<u16>(centiSeconds); //x/100 seconds per frame
+        buf.write_unsafe<u8>(0); //transparent color index
+        buf.write_unsafe<u8>(0); //block terminator
+
+        //image descriptor
+        buf.write_unsafe<u8>(0x2C); //image separator
+        buf.write_unsafe<u16>(0); //image left
+        buf.write_unsafe<u16>(0); //image top
+        buf.write_unsafe<u16>(width);
+        buf.write_unsafe<u16>(height);
+        //local color table flag, interlace flag, sort flag, reserved, local color table size
+        buf.write_unsafe<u8>(0b1'0'0'00'000 | (tableBits - 1));
+
+        //local color table
+        buf.write_block(table, tableSize);
+
+        //image data
+        BlockBuffer block = {};
+        buf.write<u8>(tableBits); //lzw minimum code size
+        reset(&lzw, tableSize);
+        //XXX: do we actually need to write this?
+        put_code(&buf, &block, _bit_scan_reverse(lzw.len - 1) + 1, tableSize); //clear code
+
+        int lastCode = cframe[0] == pframe[0]? 0 : tlb[cframe[0]];
+        for (int i : range(1, width * height)) {
+            idxBuffer.add(cframe[i] == pframe[i]? 0 : tlb[cframe[i]]);
+            int code = lzw[lastCode].next[idxBuffer[idxBuffer.len - 1]];
+            if (code < 0) {
+                //write to code stream
+                int codeBits = _bit_scan_reverse(lzw.len - 1) + 1;
+                put_code(&buf, &block, codeBits, lastCode);
+                // printf("%d-%d-%d  ", lastCode, codeBits, (int) lzw.len);
+
+                //NOTE: [I THINK] we need to leave room for 2 more codes (leftover and end code)
+                //      because we don't ever reset the table after writing the leftover bits
+                //XXX: is my thinking correct on this one?
+                if (lzw.len > 4094) {
+                    //reset buffer code table
+                    put_code(&buf, &block, codeBits, tableSize);
+                    reset(&lzw, tableSize);
+                } else {
+                    lzw[lastCode].next[idxBuffer[idxBuffer.len - 1]] = lzw.len;
+                    ++lzw.len;
+                }
+
+                //reset index buffer
+                idxBuffer[0] = idxBuffer[idxBuffer.len - 1];
+                idxBuffer.len = 1;
+
+                lastCode = idxBuffer[0];
+            } else {
+                lastCode = code;
+            }
+
+            //DEBUG
+            if (idxBuffer.len > largestIdxBuffer)
+                largestIdxBuffer = idxBuffer.len;
+        }
+
+        //write code for leftover index buffer contents, then the end code
+        put_code(&buf, &block, _bit_scan_reverse(lzw.len - 1) + 1, lastCode);
+        put_code(&buf, &block, _bit_scan_reverse(lzw.len) + 1, tableSize + 1); //end code
 
         //flush remaining data
         if (block.bits) {
             int bytes = (block.bits + 7) / 8; //round up
-            buf.write<u8>(bytes);
-            for (int i : range(bytes)) {
-                buf.write(block.bytes[i]);
-            }
+            buf.check(bytes + 1);
+            buf.write_unsafe<u8>(bytes);
+            buf.write_block_unsafe(block.bytes, bytes);
         }
 
         buf.write<u8>(0); //terminating block
-
-        //reset encoding state
-        lzw.bytes.len = 0;
-        lzw.codes.len = 0;
-        idxBuffer.len = 0;
+        idxBuffer.len = 0; //reset encoding state
     }
 
-    //DEBUG
-    printf("largest idx buffer: %d\n", largestIdxBuffer);
-    printf("largest byte list: %d\n", largestByteList);
+    printf("palette time: %fs\n", paletteTotal); //DEBUG
+    printf("largest idx buffer: %d\n", largestIdxBuffer); //DEBUG
 
     buf.write<u8>(0x3B); //trailing marker
 
@@ -1110,9 +1152,11 @@ void save_gif(int width, int height, List<RawFrame> frames) {
 
     //cleanup
     buf.finalize();
-    lzw.bytes.finalize();
-    lzw.codes.finalize();
+    lzw.finalize();
     idxBuffer.finalize();
+    for (u16 * frame : cookedFrames)
+        free(frame);
+    cookedFrames.finalize();
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1130,6 +1174,9 @@ struct DrawCall {
 # undef main
 #endif
 
+// #include <mach-o/dyld.h>
+#include <unistd.h>
+
 int main() {
 #ifdef _WIN32
     bool success = load_sdl_functions("link/SDL2.dll");
@@ -1137,6 +1184,9 @@ int main() {
         printf("exiting application because we couldn't load SDL dynamically\n");
         exit(1);
     }
+#else
+    // if (chdir("/Users/stuntddude/Dropbox/c/DIWide"))
+    //     printf("        !!!chdir failed!!!\n");
 #endif
 
     //initialize timer
@@ -1180,10 +1230,11 @@ int main() {
         { { 1, 1, 0 },   { 0, 0, 1 },   { 1, 0, 0 },   { 0, 1, 0 },    2,  2 },
     };
     Triangle _triangles[2] = { { 0, 3, 1 }, { 0, 2, 3 } };
-    Model test = { 4, _vertices, (Vert *) malloc(4 * sizeof(Vert)), 2, _triangles, sword->tex };
+    Model test = { 4, _vertices, (Vert *) malloc(4 * sizeof(Vert)), 2, _triangles, // sword->tex };
+            load_texture("res/metal1_c.png", "res/metal1_n.png") };
     Model floor = { 4, _vertices, (Vert *) malloc(4 * sizeof(Vert)), 2, _triangles,
-                     // load_texture("res/cobblestone1_c.png", "res/cobblestone1_n.png") };
-                     load_texture("res/tiles1_c.png", "res/tiles1_n.png") };
+            load_texture("res/cobblestone1_c.png", "res/cobblestone1_n.png") };
+            // load_texture("res/tiles1_c.png", "res/tiles1_n.png") };
 
     MonoFont mono = load_mono_font("3x6-bw.png", 16, 8);
     printf("SDL full init: %f seconds\n", get_time());
@@ -1208,12 +1259,12 @@ int main() {
 
     List<DrawCall> drawList = {};
 
-    u64 perfRasterLowest = 10000000000;
-
     bool recordingGif = false;
     float gifTimer = 0;
+    int gifFps = 20;
     List<RawFrame> gifFrames = {};
 
+    u64 perfRasterLowest = 10000000000;
     bool shouldExit = false;
     while (!shouldExit) {
         float dmx = 0, dmy = 0;
@@ -1224,10 +1275,11 @@ int main() {
             } else if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
                 isDown[event.key.keysym.scancode] = event.type == SDL_KEYDOWN;
                 if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_G) {
+                    int centiSeconds = 100/gifFps;
                     if (recordingGif) {
                         printf("Saving GIF...\n");
                         float preGif = get_time();
-                        save_gif(gameWidth, gameHeight, gifFrames);
+                        save_gif(gameWidth, gameHeight, gifFrames, centiSeconds);
                         printf("%fs\n", get_time() - preGif);
                         gifFrames.len = 0;
                     }
@@ -1310,12 +1362,6 @@ int main() {
         frameTimes[ARR_SIZE(frameTimes) - 1] = dt;
 
         float framerate = ARR_SIZE(frameTimes) / timeSum;
-        // if (frame % 100 == 9) {
-        //     printf("total: %6d   drawn: %6d   shadow total: %6d   shadow: %6d   clipped: %5d"
-        //            "   draw calls: %6d   fps: %3d\n",
-        //            totalTris, drawnTris, shadowTotalTris, shadowDrawnTris, clippedTris,
-        //            (int) drawList.len, (int)(framerate + 0.5f));
-        // }
 
 #if 1
         u64 preText = perf();
@@ -1443,17 +1489,27 @@ int main() {
 
         //set aside frames for GIF
         if (recordingGif) {
-            int gifFps = 10;
             float gifFrameTime = 1.0f / gifFps;
             gifTimer += dt;
             if (gifTimer > gifFrameTime) {
                 gifTimer -= gifFrameTime;
-                printf("Setting aside GIF frame...\n");
+                printf("Setting aside GIF frame %d...\n", (int)(gifFrames.len + 1));
                 //we steal the canvas's memory block because it's much faster than copying the data
                 gifFrames.add({ canvas->base, canvas->pixels, canvas->pitch });
                 size_t offset = canvas->pixels - canvas->base;
                 canvas->base = (Pixel *) malloc(canvas->pixelBytes);
                 canvas->pixels = canvas->base + offset;
+
+                int centiSeconds = 100/gifFps;
+                if ((int) gifFrames.len == 125 * gifFps/10) {
+                    printf("Saving GIF...\n");
+                    float preGif = get_time();
+                    save_gif(gameWidth, gameHeight, gifFrames, centiSeconds);
+                    printf("%fs\n", get_time() - preGif);
+                    gifFrames.len = 0;
+                    gifTimer = 0;
+                    recordingGif = false;
+                }
             }
         }
 
