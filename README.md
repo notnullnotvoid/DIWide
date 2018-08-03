@@ -11,6 +11,7 @@ Features:
 - post-processing bit-depth reduction
 - built-in custom GIF exporter
 
-![](https://i.imgur.com/ygKthk3.gif)
+![](https://i.imgur.com/lATL7sO.gif)
+![](https://i.imgur.com/aFhFUMK.gif)
 ![](https://i.imgur.com/9QAmmLm.png)
 ![](https://i.imgur.com/p627VsA.png)
