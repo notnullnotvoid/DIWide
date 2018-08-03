@@ -5,4 +5,5 @@ export NINJA_STATUS='[%t/%f] %es '
 ninja || exit
 rm build.ninja
 
-./game
+# ./game
+nice -n 10 ./game

@@ -4,7 +4,6 @@ builddir = build
 
 #partial option sets
 common = -I. -ISDL2 -Ilib -mmacosx-version-min=10.10.0
-#cppflags = -std=c++11 -stdlib=libc++
 cppflags = -std=c++14
 cflags = -std=c11
 
@@ -12,8 +11,7 @@ opt = -Ofast -march=native
 
 libflags = $common $opt
 srcflags = $common -Wall -Wno-unused-variable $opt
-linkflags = -lc++ -lSDL2 -headerpad_max_install_names
-#linkflags = -F "$HOME/Library/Frameworks" -framework SDL2 -lc++
+linkflags = -lSDL2 -headerpad_max_install_names
 
 #compiler = /usr/local/opt/llvm/bin/clang
 compiler = gcc-8
@@ -51,7 +49,6 @@ rule src
 rule link
     command = $compiler $linkflags -mmacosx-version-min=10.10.0 $in -o $out
     description = Linking executable $out
-#    command = ld -demangle -dynamic -arch x86_64 -macosx_version_min 10.10.0 -o $out $linkflags $in -lSystem
 
 rule img_pack
     command = res/build.sh

@@ -88,7 +88,7 @@ struct FileBuffer {
 };
 
 //convenience function for same-line declaration+initialization
-FileBuffer create_file_buffer(size_t bytes = 1024) {
+inline FileBuffer create_file_buffer(size_t bytes = 1024) {
     FileBuffer buf;
     buf.init(bytes);
     return buf;

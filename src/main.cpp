@@ -17,9 +17,8 @@
 
 
 //- sort out what code needs to get put into headers to be shared between rasterizers
-//- move common.hpp, math.hpp, List.hpp, and FileBuffer.hpp into their own directory
 //- label and update all those separator comments
-//- figure out how to do
+//- document the whole project better, frankly
 
 //global TODO:
 //- sorting the render queue
@@ -46,11 +45,14 @@
 
 //- vsync?
 
+//- some way of saving/loading(/editing?) state : camera pos, scene def, etc.
+
 #include "common.hpp"
 
 static_assert(sizeof(size_t) == 8, "must be compiled in 64-bit mode");
 
 #include "blit.hpp"
+#include "gif.hpp"
 #include "math.hpp"
 #include "List.hpp"
 #include "FileBuffer.hpp"
@@ -66,9 +68,9 @@ static_assert(sizeof(size_t) == 8, "must be compiled in 64-bit mode");
 #ifdef _MSC_VER
     #include "intrin.h"
 #else
-    // #include "x86intrin.h"
-    #define _bit_scan_reverse __builtin_ia32_bsrsi
-    #define __rdtscp __builtin_ia32_rdtscp
+    #include "x86intrin.h"
+    // #define _bit_scan_reverse __builtin_ia32_bsrsi
+    // #define __rdtscp __builtin_ia32_rdtscp
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -77,15 +79,15 @@ static_assert(sizeof(size_t) == 8, "must be compiled in 64-bit mode");
 
 #ifdef _WIN32
 
-Uint64 (* GetPerformanceCounter) ();
-Uint64 (* GetPerformanceFrequency) ();
-int (* Init) (Uint32 flags);
-const char * (* GetError) ();
-SDL_Window * (* CreateWindow) (const char* title, int x, int y, int w, int h, Uint32 flags);
-int (* PollEvent) (SDL_Event * event);
-SDL_Surface * (* GetWindowSurface) (SDL_Window * window);
-int (* UpdateWindowSurface) (SDL_Window * window);
-int (* SetRelativeMouseMode) (SDL_bool enabled);
+Uint64 (* _GetPerformanceCounter) ();
+Uint64 (* _GetPerformanceFrequency) ();
+int (* _Init) (Uint32 flags);
+const char * (* _GetError) ();
+SDL_Window * (* _CreateWindow) (const char* title, int x, int y, int w, int h, Uint32 flags);
+int (* _PollEvent) (SDL_Event * event);
+SDL_Surface * (* _GetWindowSurface) (SDL_Window * window);
+int (* _UpdateWindowSurface) (SDL_Window * window);
+int (* _SetRelativeMouseMode) (SDL_bool enabled);
 
 #include <windows.h>
 
@@ -101,7 +103,7 @@ bool load_func(HMODULE handle, TYPE * func, const char * name) {
 }
 
 //we don't care to unload the DLL before application exit,
-//so it's fine that we just throw away the handle inside these functions
+//so it's fine that we just throw away the handle inside this function
 //instead of returning it like we're "supposed" to
 bool load_sdl_functions(const char * filepath) {
     HMODULE handle = LoadLibraryA(filepath);
@@ -111,28 +113,28 @@ bool load_sdl_functions(const char * filepath) {
         return false;
     }
 
-    if (!load_func(handle, &GetPerformanceCounter, "SDL_GetPerformanceCounter"))     return false;
-    if (!load_func(handle, &GetPerformanceFrequency, "SDL_GetPerformanceFrequency")) return false;
-    if (!load_func(handle, &Init, "SDL_Init"))                                       return false;
-    if (!load_func(handle, &GetError, "SDL_GetError"))                               return false;
-    if (!load_func(handle, &CreateWindow, "SDL_CreateWindow"))                       return false;
-    if (!load_func(handle, &PollEvent, "SDL_PollEvent"))                             return false;
-    if (!load_func(handle, &GetWindowSurface, "SDL_GetWindowSurface"))               return false;
-    if (!load_func(handle, &UpdateWindowSurface, "SDL_UpdateWindowSurface"))         return false;
-    if (!load_func(handle, &SetRelativeMouseMode, "SDL_SetRelativeMouseMode"))       return false;
+    if (!load_func(handle, &_GetPerformanceCounter, "SDL_GetPerformanceCounter"))     return false;
+    if (!load_func(handle, &_GetPerformanceFrequency, "SDL_GetPerformanceFrequency")) return false;
+    if (!load_func(handle, &_Init, "SDL_Init"))                                       return false;
+    if (!load_func(handle, &_GetError, "SDL_GetError"))                               return false;
+    if (!load_func(handle, &_CreateWindow, "SDL_CreateWindow"))                       return false;
+    if (!load_func(handle, &_PollEvent, "SDL_PollEvent"))                             return false;
+    if (!load_func(handle, &_GetWindowSurface, "SDL_GetWindowSurface"))               return false;
+    if (!load_func(handle, &_UpdateWindowSurface, "SDL_UpdateWindowSurface"))         return false;
+    if (!load_func(handle, &_SetRelativeMouseMode, "SDL_SetRelativeMouseMode"))       return false;
 
     return true;
 }
 
-#define SDL_GetPerformanceCounter GetPerformanceCounter
-#define SDL_GetPerformanceFrequency GetPerformanceFrequency
-#define SDL_Init Init
-#define SDL_GetError GetError
-#define SDL_CreateWindow CreateWindow
-#define SDL_PollEvent PollEvent
-#define SDL_GetWindowSurface GetWindowSurface
-#define SDL_UpdateWindowSurface UpdateWindowSurface
-#define SDL_SetRelativeMouseMode SetRelativeMouseMode
+#define SDL_GetPerformanceCounter _GetPerformanceCounter
+#define SDL_GetPerformanceFrequency _GetPerformanceFrequency
+#define SDL_Init _Init
+#define SDL_GetError _GetError
+#define SDL_CreateWindow _CreateWindow
+#define SDL_PollEvent _PollEvent
+#define SDL_GetWindowSurface _GetWindowSurface
+#define SDL_UpdateWindowSurface _UpdateWindowSurface
+#define SDL_SetRelativeMouseMode _SetRelativeMouseMode
 
 #endif // _WIN32
 
@@ -871,298 +873,6 @@ void draw_text(Canvas * canvas, MonoFont * font, int x, int y, const char * text
 ///                                                                                              ///
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-//TODO: re-use `used` buffers calculated during meta palette choice for palette generation
-//TODO: SIMD-ize "pre-amble" code
-//TODO: improve memory usage of trie by only allocating as many colors per node
-//      as are used globally, and only bumping the pointer by as many as are used locally
-
-struct RawFrame {
-    Pixel * base;
-    Pixel * pixels;
-    int pitch;
-};
-
-//TODO: find a way to write the data blocks without storing up a buffer of 255 bytes
-struct BlockBuffer {
-    u16 bits;
-    u8 bytes[257]; //up to 12 bits can be written at once, so we need 2 extra "overflow" bytes
-};
-
-//XXX: this is very slow because of how it uses the file buffer!
-void put_code(FileBuffer * buf, BlockBuffer * block, int bits, u16 code) {
-    //insert new code into block buffer
-    int idx = block->bits / 8;
-    int bit = block->bits % 8;
-    block->bytes[idx + 0] |= code <<       bit      ;
-    block->bytes[idx + 1] |= code >>  (8 - bit)     ;
-    block->bytes[idx + 2] |= code >> ((8 - bit) + 8);
-    block->bits += bits;
-
-    //flush the block buffer if it's full
-    if (block->bits >= 255 * 8) {
-        buf->check(256);
-        buf->write_unsafe<u8>(255);
-        buf->write_block_unsafe(block->bytes, 255);
-
-        block->bits -= 255 * 8;
-        block->bytes[0] = block->bytes[255];
-        block->bytes[1] = block->bytes[256];
-        memset(block->bytes + 2, 0, 255);
-    }
-}
-
-//TODO: replace this array list implementation with a trie
-struct Code {
-    u16 len; //number of bytes represented by this code
-    u16 idx; //index into byte list
-};
-
-struct TrieNode {
-    i16 next[256];
-};
-
-void reset(List<TrieNode> * lzw, int tableSize) {
-    memset(lzw->data, 0xFF, 4096 * sizeof(TrieNode));
-    lzw->len = tableSize + 2;
-}
-
-int choose_meta_palette(List<u16 *> cookedFrames, int width, int height) {
-    bool used[4096];
-    bool used2[4096];
-    int maxUsed[6] = {};
-    int cvtMasks[6] = { 0xFFF, 0xEFF, 0xEFE, 0xEEE, 0xCEE, 0xCEC }; //favor green > red > blue
-    // int cvtMasks[6] = { 0xFFF, 0xEFF, 0xEEF, 0xEEE, 0xCEE, 0xCCE }; //favor red > green > blue
-    //count how many colors are used out of each of a number of possible meta-palettes
-    for (int i : range(1, cookedFrames.len)) {
-        u16 * frame = cookedFrames[i];
-        memset(used, 0, 4096 * sizeof(bool));
-        for (int i : range(width * height))
-            used[frame[i]] = true;
-
-        for (int m : range(6)) {
-            memset(used2, 0, 4096 * sizeof(u8));
-            for (int i : range(4096))
-                used2[i & cvtMasks[m]] |= used[i];
-            int count = 0;
-            for (int i : range(4096))
-                if (used2[i])
-                    ++count;
-            printf("used %3d colors out of %4d\t\t", count, 1 << (12 - m));
-            maxUsed[m] = imax(maxUsed[m], count);
-        }
-        printf("\n");
-    }
-
-    for (int m : range(6)) {
-        printf("used at most %3d colors out of %4d\n", maxUsed[m], 1 << (12 - m));
-    }
-
-    for (int m : range(6)) {
-        if (maxUsed[m] < 256) {
-            return cvtMasks[m];
-        }
-    }
-
-    return 0; //this should never happen
-}
-
-void save_gif(int width, int height, List<RawFrame> rawFrames, int centiSeconds) {
-    float preAmble = get_time();
-
-    //cook frames (downsample to 12-bit color)
-    List<u16 *> cookedFrames = create_list<u16 *>(rawFrames.len);
-    cookedFrames.add((u16 *) malloc(width * height * sizeof(u16))); //dummy frame for diff base
-    memset(cookedFrames[0], 0, width * height * sizeof(u16)); //set dummy frame to background color
-    for (RawFrame frame : rawFrames) {
-        u16 * data = (u16 *) malloc(width * height * sizeof(u16));
-        for (int y : range(height)) {
-            for (int x : range(width)) {
-                Pixel p = frame.pixels[y * frame.pitch + x];
-                data[y * width + x] = (p.b & 0xF0) << 4 | (p.g & 0xF0) | (p.r & 0xF0) >> 4;
-            }
-        }
-        cookedFrames.add(data);
-        free(frame.base);
-    }
-
-    //season the frames (apply mask)
-    float preChoice = get_time();
-    int cvtMask = choose_meta_palette(cookedFrames, width, height);
-    printf("choice: %fs\n", get_time() - preChoice);
-    printf("conversion mask: %X\n", cvtMask);
-    for (u16 * frame : cookedFrames) {
-        for (int i : range(width * height)) {
-            frame[i] &= cvtMask;
-        }
-    }
-
-    printf("preAmble: %fs\n", get_time() - preAmble);
-
-    //header
-    FileBuffer buf = create_file_buffer(2048);
-    for (char c : range("GIF89a")) {
-        buf.write_unsafe(c);
-    }
-
-    //logical screen descriptor
-    buf.write_unsafe<u16>(width);
-    buf.write_unsafe<u16>(height);
-    //global color table flag, color resolution (???), sort flag, global color table size
-    buf.write_unsafe<u8>(0b0'001'0'000);
-    buf.write_unsafe<u8>(0); //background color index
-    buf.write_unsafe<u8>(0); //pixel aspect ratio
-
-    //application extension
-    buf.write_unsafe<u8>(0x21); //extension introducer
-    buf.write_unsafe<u8>(0xFF); //extension identifier
-    buf.write_unsafe<u8>(11); //fixed length data size
-    for (char c : range("NETSCAPE2.0")) {
-        buf.write_unsafe(c);
-    }
-    buf.write_unsafe<u8>(3); //data block size
-    buf.write_unsafe<u8>(1); //???
-    buf.write_unsafe<u16>(0); //loop forever
-    buf.write_unsafe<u8>(0); //block terminator
-
-    List<TrieNode> lzw = create_list<TrieNode>(4096);
-    List<u8> idxBuffer = create_list<u8>(200);
-    uint largestIdxBuffer = 0; //DEBUG
-
-    float paletteTotal = 0;
-    for (int i : range(1, cookedFrames.len)) {
-        u16 * pframe = cookedFrames[i - 1];
-        u16 * cframe = cookedFrames[i];
-        // printf("\n\n\n\nnew frame\n\n\n\n");
-
-        float prePalette = get_time();
-        //generate palette
-        u8 tlb[4096] = {};
-        struct Color3 { u8 r, g, b; };
-        Color3 table[256] = {};
-        int tableIdx = 1; //we start counting at 1 because 0 is the transparent color
-        for (int i : range(width * height)) {
-            if (!tlb[cframe[i]]) {
-                tlb[cframe[i]] = tableIdx;
-                table[tableIdx] = {
-                    (u8)((cframe[i] & 0x00F) << 4 | (cframe[i] & 0x00F)     ),
-                    (u8)((cframe[i] & 0x0F0)      | (cframe[i] & 0x0F0) >> 4),
-                    (u8)((cframe[i] & 0xF00) >> 4 | (cframe[i] & 0xF00) >> 8),
-                };
-                ++tableIdx;
-            }
-        }
-        paletteTotal += get_time() - prePalette;
-
-        int tableBits = _bit_scan_reverse(tableIdx - 1) + 1;
-        int tableSize = 1 << tableBits;
-        // printf("idx: %d bits: %d size: %d\n\n\n\n", tableIdx, tableBits, tableSize);
-
-        buf.check(8 + 10);
-        //graphics control extension
-        buf.write_unsafe<u8>(0x21); //extension introducer
-        buf.write_unsafe<u8>(0xF9); //extension identifier
-        buf.write_unsafe<u8>(4); //block size (always 4)
-        //reserved, disposal method:keep, input flag, transparency flag
-        buf.write_unsafe<u8>(0b000'001'0'0 | (i != 1));
-        buf.write_unsafe<u16>(centiSeconds); //x/100 seconds per frame
-        buf.write_unsafe<u8>(0); //transparent color index
-        buf.write_unsafe<u8>(0); //block terminator
-
-        //image descriptor
-        buf.write_unsafe<u8>(0x2C); //image separator
-        buf.write_unsafe<u16>(0); //image left
-        buf.write_unsafe<u16>(0); //image top
-        buf.write_unsafe<u16>(width);
-        buf.write_unsafe<u16>(height);
-        //local color table flag, interlace flag, sort flag, reserved, local color table size
-        buf.write_unsafe<u8>(0b1'0'0'00'000 | (tableBits - 1));
-
-        //local color table
-        buf.write_block(table, tableSize);
-
-        //image data
-        BlockBuffer block = {};
-        buf.write<u8>(tableBits); //lzw minimum code size
-        reset(&lzw, tableSize);
-        //XXX: do we actually need to write this?
-        put_code(&buf, &block, _bit_scan_reverse(lzw.len - 1) + 1, tableSize); //clear code
-
-        int lastCode = cframe[0] == pframe[0]? 0 : tlb[cframe[0]];
-        for (int i : range(1, width * height)) {
-            idxBuffer.add(cframe[i] == pframe[i]? 0 : tlb[cframe[i]]);
-            int code = lzw[lastCode].next[idxBuffer[idxBuffer.len - 1]];
-            if (code < 0) {
-                //write to code stream
-                int codeBits = _bit_scan_reverse(lzw.len - 1) + 1;
-                put_code(&buf, &block, codeBits, lastCode);
-                // printf("%d-%d-%d  ", lastCode, codeBits, (int) lzw.len);
-
-                //NOTE: [I THINK] we need to leave room for 2 more codes (leftover and end code)
-                //      because we don't ever reset the table after writing the leftover bits
-                //XXX: is my thinking correct on this one?
-                if (lzw.len > 4094) {
-                    //reset buffer code table
-                    put_code(&buf, &block, codeBits, tableSize);
-                    reset(&lzw, tableSize);
-                } else {
-                    lzw[lastCode].next[idxBuffer[idxBuffer.len - 1]] = lzw.len;
-                    ++lzw.len;
-                }
-
-                //reset index buffer
-                idxBuffer[0] = idxBuffer[idxBuffer.len - 1];
-                idxBuffer.len = 1;
-
-                lastCode = idxBuffer[0];
-            } else {
-                lastCode = code;
-            }
-
-            //DEBUG
-            if (idxBuffer.len > largestIdxBuffer)
-                largestIdxBuffer = idxBuffer.len;
-        }
-
-        //write code for leftover index buffer contents, then the end code
-        put_code(&buf, &block, _bit_scan_reverse(lzw.len - 1) + 1, lastCode);
-        put_code(&buf, &block, _bit_scan_reverse(lzw.len) + 1, tableSize + 1); //end code
-
-        //flush remaining data
-        if (block.bits) {
-            int bytes = (block.bits + 7) / 8; //round up
-            buf.check(bytes + 1);
-            buf.write_unsafe<u8>(bytes);
-            buf.write_block_unsafe(block.bytes, bytes);
-        }
-
-        buf.write<u8>(0); //terminating block
-        idxBuffer.len = 0; //reset encoding state
-    }
-
-    printf("palette time: %fs\n", paletteTotal); //DEBUG
-    printf("largest idx buffer: %d\n", largestIdxBuffer); //DEBUG
-
-    buf.write<u8>(0x3B); //trailing marker
-
-    //write data to file
-    FILE * fp = fopen("out.gif", "wb");
-    assert(fp);
-    fwrite(buf.block, buf.size(), 1, fp);
-    fclose(fp);
-
-    //cleanup
-    buf.finalize();
-    lzw.finalize();
-    idxBuffer.finalize();
-    for (u16 * frame : cookedFrames)
-        free(frame);
-    cookedFrames.finalize();
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-///                                                                                              ///
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
 struct DrawCall {
     Model * model;
     Mat4 mat;
@@ -1174,9 +884,6 @@ struct DrawCall {
 # undef main
 #endif
 
-// #include <mach-o/dyld.h>
-#include <unistd.h>
-
 int main() {
 #ifdef _WIN32
     bool success = load_sdl_functions("link/SDL2.dll");
@@ -1184,9 +891,6 @@ int main() {
         printf("exiting application because we couldn't load SDL dynamically\n");
         exit(1);
     }
-#else
-    // if (chdir("/Users/stuntddude/Dropbox/c/DIWide"))
-    //     printf("        !!!chdir failed!!!\n");
 #endif
 
     //initialize timer
@@ -1201,10 +905,11 @@ int main() {
     const int gameWidth = 192*2;
     const int gameHeight = 120*2;
     const int gameScale = 4;
-    assert(gameWidth % 8 == 0);
+    assert(gameWidth % 8 * 2 == 0);
 
     SDL_Window * window = SDL_CreateWindow("Test Window",
-        SDL_WINDOWPOS_CENTERED_DISPLAY(1), SDL_WINDOWPOS_CENTERED_DISPLAY(1),
+        // SDL_WINDOWPOS_CENTERED_DISPLAY(1), SDL_WINDOWPOS_CENTERED_DISPLAY(1),
+        SDL_WINDOWPOS_CENTERED_DISPLAY(0), SDL_WINDOWPOS_CENTERED_DISPLAY(0),
         gameWidth * gameScale, gameHeight * gameScale, SDL_WINDOW_SHOWN);
     if (!window) {
         printf("SDL FAILED TO CREATE WINDOW: %s\n", SDL_GetError());
@@ -1245,6 +950,8 @@ int main() {
     bool isDown[256] = {};
     bool captured = false;
     SDL_SetRelativeMouseMode((SDL_bool)captured); //yo this cast sucks shit. fuck you, SDL
+    bool showText = true;
+    bool showInstructions = true;
 
     //camera
     Vec3 camPos = vec3(-2, 1.5, 7);
@@ -1274,17 +981,23 @@ int main() {
                 shouldExit = true;
             } else if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
                 isDown[event.key.keysym.scancode] = event.type == SDL_KEYDOWN;
-                if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_G) {
-                    int centiSeconds = 100/gifFps;
-                    if (recordingGif) {
-                        printf("Saving GIF...\n");
-                        float preGif = get_time();
-                        save_gif(gameWidth, gameHeight, gifFrames, centiSeconds);
-                        printf("%fs\n", get_time() - preGif);
-                        gifFrames.len = 0;
+                if (event.type == SDL_KEYDOWN) {
+                    if (event.key.keysym.scancode == SDL_SCANCODE_G) {
+                        int centiSeconds = 100/gifFps;
+                        if (recordingGif) {
+                            printf("Saving GIF...\n");
+                            float preGif = get_time();
+                            save_gif(gameWidth, gameHeight, gifFrames, centiSeconds);
+                            printf("%fs\n", get_time() - preGif);
+                            gifFrames.len = 0;
+                        }
+                        gifTimer = 0;
+                        recordingGif = !recordingGif;
+                    } else if (event.key.keysym.scancode == SDL_SCANCODE_I) {
+                        showInstructions = !showInstructions;
+                    } else if (event.key.keysym.scancode == SDL_SCANCODE_T) {
+                        showText = !showText;
                     }
-                    gifTimer = 0;
-                    recordingGif = !recordingGif;
                 }
             } else if (event.type == SDL_MOUSEMOTION) {
                 dmx += event.motion.xrel;
@@ -1319,7 +1032,9 @@ int main() {
 
             float sp = dt * 10;
             if (isDown[SDL_SCANCODE_LSHIFT]) {
-                sp *= 0.25f;
+                // sp *= 0.25f;
+                sp *= 0.333f;
+                // sp *= 0.4f;
             }
 
             if (isDown[SDL_SCANCODE_A]) {
@@ -1363,45 +1078,58 @@ int main() {
 
         float framerate = ARR_SIZE(frameTimes) / timeSum;
 
-#if 1
-        u64 preText = perf();
-        char buffer[250];
-        sprintf(buffer, "total:        %5d   drawn:      %5d", totalTris, drawnTris);
-        draw_text(canvas, &mono, 4, 4, buffer);
-        sprintf(buffer, "shadow total: %5d   shadow:     %5d", shadowTotalTris, shadowDrawnTris);
-        draw_text(canvas, &mono, 4, 12, buffer);
-        sprintf(buffer, "clipped:      %5d   draw calls: %5d", clippedTris, (int) drawList.len);
-        draw_text(canvas, &mono, 4, 20, buffer);
-        sprintf(buffer, "fps: %3d", (int)(framerate + 0.5f));
-        draw_text(canvas, &mono, canvas->width - strlen(buffer) * mono.glyphWidth - 4, 4, buffer);
+        if (showText) {
+            u64 preText = perf();
+            char buffer[250];
+            sprintf(buffer, "total:        %5d   drawn:      %5d", totalTris, drawnTris);
+            draw_text(canvas, &mono, 4, 4, buffer);
+            sprintf(buffer, "shadow total: %5d   shadow:     %5d", shadowTotalTris,
+                                                                   shadowDrawnTris);
+            draw_text(canvas, &mono, 4, 12, buffer);
+            sprintf(buffer, "clipped:      %5d   draw calls: %5d", clippedTris, (int)drawList.len);
+            draw_text(canvas, &mono, 4, 20, buffer);
+            sprintf(buffer, "fps: %3d", (int)(framerate + 0.5f));
+            draw_text(canvas, &mono, canvas->width - strlen(buffer) * mono.glyphWidth - 4, 4,
+                      buffer);
 
-        sprintf(buffer, "fill:      %6lldk", perfFill      / 1024);
-        draw_text(canvas, &mono, 4, 36, buffer);
-        sprintf(buffer, "text:      %6lldk", perfText      / 1024);
-        draw_text(canvas, &mono, 4, 44, buffer);
-        sprintf(buffer, "shadow:    %6lldk", perfShadow    / 1024);
-        draw_text(canvas, &mono, 4, 52, buffer);
-        sprintf(buffer, "draw:      %6lldk", perfDraw      / 1024);
-        draw_text(canvas, &mono, 4, 60, buffer);
-        sprintf(buffer, "blit:      %6lldk", perfBlit      / 1024);
-        draw_text(canvas, &mono, 4, 68, buffer);
+            sprintf(buffer, "fill:      %6lldk", perfFill      / 1024);
+            draw_text(canvas, &mono, 4, 36, buffer);
+            sprintf(buffer, "text:      %6lldk", perfText      / 1024);
+            draw_text(canvas, &mono, 4, 44, buffer);
+            sprintf(buffer, "shadow:    %6lldk", perfShadow    / 1024);
+            draw_text(canvas, &mono, 4, 52, buffer);
+            sprintf(buffer, "draw:      %6lldk", perfDraw      / 1024);
+            draw_text(canvas, &mono, 4, 60, buffer);
+            sprintf(buffer, "blit:      %6lldk", perfBlit      / 1024);
+            draw_text(canvas, &mono, 4, 68, buffer);
 
-        sprintf(buffer, "transform: %6lldk", perfTransform / 1024);
-        draw_text(canvas, &mono, 4, 84, buffer);
-        sprintf(buffer, "rasterize: %6lldk", perfRasterize / 1024);
-        draw_text(canvas, &mono, 4, 92, buffer);
-        sprintf(buffer, "inner:     %6lldk", perfInner     / 1024);
-        draw_text(canvas, &mono, 4, 100, buffer);
+            sprintf(buffer, "transform: %6lldk", perfTransform / 1024);
+            draw_text(canvas, &mono, 4, 84, buffer);
+            sprintf(buffer, "rasterize: %6lldk", perfRasterize / 1024);
+            draw_text(canvas, &mono, 4, 92, buffer);
+            sprintf(buffer, "inner:     %6lldk", perfInner     / 1024);
+            draw_text(canvas, &mono, 4, 100, buffer);
 
-        sprintf(buffer, "lowest:    %6lldk", perfRasterLowest / 1024);
-        draw_text(canvas, &mono, 4, 116, buffer);
+            sprintf(buffer, "lowest:    %6lldk", perfRasterLowest / 1024);
+            draw_text(canvas, &mono, 4, 116, buffer);
 
-        if (recordingGif) {
-            draw_text(canvas, &mono, canvas->width - strlen("GIF") * mono.glyphWidth - 4,
-                                     canvas->height - mono.glyphHeight - 4, "GIF");
+            if (showInstructions) {
+                draw_text(canvas, &mono, 4, canvas->height - (mono.glyphHeight + 1) * 4 - 4,
+                    "`~ (backtick/tilde) to enter freecam mode, ESC to exit");
+                draw_text(canvas, &mono, 4, canvas->height - (mono.glyphHeight + 1) * 3 - 4,
+                    "G to toggle GIF recording");
+                draw_text(canvas, &mono, 4, canvas->height - (mono.glyphHeight + 1) * 2 - 4,
+                    "I to toggle explanatory text");
+                draw_text(canvas, &mono, 4, canvas->height - (mono.glyphHeight + 1) * 1 - 4,
+                    "T to toggle all text");
+            }
+
+            if (recordingGif) {
+                draw_text(canvas, &mono, canvas->width - strlen("GIF") * mono.glyphWidth - 4,
+                                         canvas->height - mono.glyphHeight - 4, "GIF");
+            }
+            perfText = perf() - preText;
         }
-        perfText = perf() - preText;
-#endif
 
         totalTris = drawnTris = clippedTris = shadowTotalTris = shadowDrawnTris = 0;
         perfTransform = perfRasterize = perfInner = 0;
@@ -1500,6 +1228,7 @@ int main() {
                 canvas->base = (Pixel *) malloc(canvas->pixelBytes);
                 canvas->pixels = canvas->base + offset;
 
+                //DEBUG: used for recording looping GIFs
                 int centiSeconds = 100/gifFps;
                 if ((int) gifFrames.len == 125 * gifFps/10) {
                     printf("Saving GIF...\n");
@@ -1518,7 +1247,7 @@ int main() {
         fflush(stdout);
         fflush(stderr);
         frame += 1;
-        SDL_Delay(12);
+        // SDL_Delay(12);
 
         //uncomment this to make the game exit immediately (good for testing compile+load times)
         // shouldExit = true;

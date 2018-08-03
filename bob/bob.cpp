@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <stdarg.h>
+#include <sys/stat.h>
 
 #include "common.hpp"
 #include "List.hpp"
@@ -71,7 +72,8 @@ enum ArgType {
     ARG_OUTPUT,
 };
 
-//NOTE: this is no longer necessary, but may be useful in a future project...
+//allocates a buffer large enough to fit resulting string, an `sprintf`s to it
+//NOTE: this is no longer necessary here, but may be useful in a future project...
 //      should I maybe include it in common.hpp?
 char * dsprintf(char * buf, const char * fmt, ...) {
     size_t len = buf? strlen(buf) : 0;
@@ -178,20 +180,33 @@ int main(int argc, char ** argv) {
 
     fclose(out);
 
-
     //windows build
+    //NOTE: https://msdn.microsoft.com/en-us/library/19z1t1wy.aspx
     //TODO: specify windows build script location (and whether to generate it at all?)
-    FILE * win = fopen("build.bat", "w");
-    fprintf(win, "cl /Ox /ISDL2 /Ilib"); // /arch:AVX2 /favor:INTEL64
+    FILE * win = fopen("win-build.bat", "w");
+    fprintf(win, "cl /std:c++14 /MP /Ox /ISDL2 /Ilib"); // /arch:AVX2 /favor:INTEL64
     for (File f : files) {
         if (one_of({ FILE_CPPLIB, FILE_CLIB, FILE_SRC }, f.type)) {
             fprintf(win, " %s/%s.%s", f.dir, f.name, f.ext);
         }
     }
-    fprintf(win, " /link /out:game.exe /SUBSYSTEM:CONSOLE\r\ndel *.obj\r\ngame.exe\r\n");
-
+    fprintf(win, " /link /out:game.exe /SUBSYSTEM:CONSOLE || exit /b\r\ndel *.obj\r\ngame.exe\r\n");
     fclose(win);
 
+    //mac simple build (no ninja required)
+    FILE * mac = fopen("mac-build.sh", "w");
+    assert(mac);
+    // fprintf(mac, "clang -std=c++11 -stdlib=libc++ -Ilib -ISDL2 -Ofast -o game");
+    fprintf(mac, "gcc-8 -std=c++14 -Ilib -ISDL2 -Ofast -o game -lSDL2");
+    for (File f : files) {
+        if (one_of({ FILE_CPPLIB, FILE_CLIB, FILE_SRC }, f.type)) {
+            fprintf(win, " %s/%s.%s", f.dir, f.name, f.ext);
+        }
+    }
+    fprintf(mac, " || exit\n./game\n");
+    fclose(mac);
+    chmod("mac-build.sh", //ALL THE PERMISSIONS :D :D :D :D :D :D
+          S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IXUSR | S_IROTH | S_IWOTH | S_IXGRP | S_IXOTH);
 
     return 0;
 }

@@ -2,14 +2,23 @@
 
 #include <stdlib.h>
 
-void * aligned_alloc(size_t align, size_t size) {
-    size_t mask = align - 1;
-    assert(!(align & mask)); //ensure alignment is power-of-two
-    void * ret = malloc(size);
-    size_t addr = (size_t) ret;
-    assert(!(addr & mask)); //ensure allocation is aligned
-    return ret;
-}
+//TODO: replace with real aligned_alloc
+#ifdef _MSC_VER
+    // #define aligned_alloc _aligned_malloc
+    void * aligned_alloc(size_t align, size_t size) {
+        // return malloc(size);
+        return _aligned_malloc(size, align);
+    }
+#else
+    void * aligned_alloc(size_t align, size_t size) {
+        size_t mask = align - 1;
+        assert(!(align & mask)); //ensure alignment is power-of-two
+        void * ret = malloc(size);
+        size_t addr = (size_t) ret;
+        assert(!(addr & mask)); //ensure allocation is aligned
+        return ret;
+    }
+#endif
 
 Canvas create_canvas(int width, int height, int margin) {
     //NOTE: we allocate extra buffer margin around the explicitly used canvas area
@@ -18,6 +27,7 @@ Canvas create_canvas(int width, int height, int margin) {
     //      eliminates the need for bounds checks and explicit handling of edge cases
     int canvasBytes = (width + 2 * margin) * (height + 2 * margin) * sizeof(Pixel);
     int bufferBytes = width * height * sizeof(float);
+    assert(margin % 8 == 0);
     assert(canvasBytes % 32 == 0); //aligned alloc will fail if this is not true!
     assert(bufferBytes % 32 == 0); //aligned alloc will fail if this is not true!
     //NOTE: we allocate on 32-byte boundaries for AVX speed,

@@ -1,3 +1,2 @@
-rm ./ply
-clang -std=c++1z -stdlib=libc++ -Wall -Ofast -o ply ply.cpp -lc++
+clang -std=c++1z -stdlib=libc++ -I../lib -Wall -Ofast -o ply ply.cpp -lc++ || exit
 ./ply -i sword7.ply -o sword7.diw
